@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lolcow Fire Games</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<style>
+:root {
+  --bg1: #0b0c10; --bg2: #16191f;
+  --cyan: #00fff7; --orange: #ff8a00; --purple: #bf00ff;
+  --green: #00ff88; --red: #ff4444;
+  --glass: rgba(20, 20, 25, 0.95);
+  --uno-red: #ff3333; --uno-blue: #3366ff; --uno-green: #33cc33; --uno-yellow: #ffcc00;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, var(--bg1), var(--bg2)); color: #fff; min-height: 100vh; }
+button { font-family: inherit; border: none; border-radius: 10px; padding: 14px 28px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 15px; }
+button:hover:not(:disabled) { transform: scale(1.03); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn { background: #444; color: #fff; }
+.btn-primary { background: var(--cyan); color: #000; }
+.btn-secondary { background: var(--orange); color: #fff; }
+.btn-ready { background: var(--green); color: #000; font-size: 1.2em; padding: 18px 40px; }
+.btn.ready-active { background: var(--orange); color: #fff; }
+input { font-family: inherit; border: 2px solid rgba(0,255,247,0.3); border-radius: 10px; padding: 14px 18px; background: rgba(255,255,255,0.08); color: #fff; font-size: 16px; }
+input::placeholder { color: rgba(255,255,255,0.5); }
+input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 20px rgba(0,255,247,0.3); }
+.screen { display: none; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+
+/* HOME */
+#home { display: flex; }
+#home .container { text-align: center; background: var(--glass); padding: 50px; border-radius: 24px; border: 3px solid var(--cyan); box-shadow: 0 0 60px rgba(0,255,247,0.25); }
+#home h1 { color: var(--cyan); font-size: 2.4em; margin-bottom: 30px; text-shadow: 0 0 30px rgba(0,255,247,0.6); line-height: 1.3; }
+#home input { width: 100%; max-width: 320px; margin-bottom: 25px; }
+#home button { width: 100%; max-width: 320px; margin: 6px 0; font-size: 17px; }
+.status-connected { color: var(--cyan); }
+.status-disconnected { color: var(--red); }
+#connectionStatus { margin-top: 20px; font-size: 0.9em; }
+
+/* GAME SELECTION */
+#gameSelection h1 { color: var(--cyan); margin-bottom: 30px; }
+.game-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 25px; max-width: 650px; width: 100%; }
+.game-card { background: var(--glass); border: 3px solid var(--cyan); border-radius: 20px; padding: 40px 25px; text-align: center; cursor: pointer; transition: all 0.3s; }
+.game-card:hover { transform: translateY(-8px); box-shadow: 0 15px 50px rgba(0,255,247,0.35); border-color: var(--orange); }
+.game-card h2 { color: var(--cyan); font-size: 1.7em; margin-bottom: 10px; }
+.game-card p { color: rgba(255,255,255,0.7); }
+
+/* LOBBY */
+#lobby { background: radial-gradient(circle at 50% 30%, rgba(0,255,247,0.12), transparent 60%), linear-gradient(135deg, var(--bg1), var(--bg2)); }
+#lobbyGameTitle { color: var(--cyan); font-size: 2.2em; margin-bottom: 20px; text-shadow: 0 0 25px rgba(0,255,247,0.5); }
+.room-code-box { background: var(--glass); border: 2px solid var(--cyan); border-radius: 16px; padding: 25px 40px; text-align: center; margin-bottom: 25px; }
+.room-code-box h3 { color: var(--cyan); font-size: 1em; margin-bottom: 5px; }
+#roomCodeDisplay { font-size: 2.8em; font-weight: bold; letter-spacing: 8px; color: var(--orange); text-shadow: 0 0 25px rgba(255,138,0,0.5); }
+.room-code-box small { color: rgba(255,255,255,0.5); display: block; margin-top: 8px; }
+
+#playerList { background: var(--glass); border: 2px solid var(--cyan); border-radius: 16px; padding: 20px; width: 100%; max-width: 500px; min-height: 180px; margin-bottom: 20px; }
+.player-card { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; margin: 10px 0; background: rgba(255,255,255,0.05); border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; transition: all 0.3s; }
+.player-card.ready { border-color: var(--green); background: rgba(0,255,136,0.1); }
+.player-card.disconnected { border-color: var(--orange); background: rgba(255,138,0,0.1); opacity: 0.7; }
+.player-card.is-me { border-width: 3px; border-color: var(--cyan); }
+.player-name { font-weight: 600; font-size: 1.15em; }
+.player-status { font-size: 0.95em; }
+.player-status.ready { color: var(--green); }
+.player-status.waiting { color: rgba(255,255,255,0.6); }
+.player-status.disconnected { color: var(--orange); }
+.no-players { padding: 50px 20px; text-align: center; color: var(--orange); border: 2px dashed rgba(255,138,0,0.4); border-radius: 12px; }
+
+#lobbyStatus { margin-bottom: 25px; font-size: 1.15em; text-align: center; min-height: 50px; }
+.status-waiting { color: var(--orange); }
+.status-ready { color: var(--green); }
+.countdown-active { color: var(--cyan); font-size: 1.3em; font-weight: bold; animation: pulse 1s infinite; }
+.countdown-number { color: var(--orange); font-size: 1.5em; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+#countdownOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 200; align-items: center; justify-content: center; flex-direction: column; }
+#countdownOverlay .countdown-number { font-size: 10em; font-weight: bold; color: var(--cyan); text-shadow: 0 0 80px var(--cyan); animation: countPulse 1s infinite; }
+#countdownOverlay p { font-size: 1.8em; color: var(--orange); margin-top: 20px; }
+@keyframes countPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+
+/* CAH GAME */
+#gameCAH { justify-content: flex-start; padding: 0; }
+.game-header { background: rgba(0,0,0,0.95); padding: 15px 25px; text-align: center; border-bottom: 3px solid var(--cyan); width: 100%; font-size: 1.2em; }
+.scoreboard { position: fixed; top: 80px; left: 20px; background: var(--glass); border: 2px solid var(--cyan); border-radius: 14px; padding: 18px; max-width: 200px; z-index: 50; }
+.scoreboard h4 { color: var(--cyan); margin-bottom: 12px; text-align: center; }
+.score-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.9em; }
+.score-row.is-czar { color: var(--cyan); font-weight: bold; }
+.game-content { flex: 1; overflow-y: auto; padding: 25px; padding-left: 240px; width: 100%; }
+
+.card { display: inline-flex; align-items: center; justify-content: center; text-align: center; border-radius: 14px; padding: 20px; margin: 8px; width: 160px; height: 200px; font-size: 14px; line-height: 1.4; transition: all 0.25s; box-shadow: 0 8px 25px rgba(0,0,0,0.5); }
+.black-card { background: linear-gradient(145deg, #1a1a1a, #0a0a0a); color: #fff; border: 3px solid var(--cyan); font-weight: 700; font-size: 15px; }
+.white-card { background: linear-gradient(145deg, #fff, #e8e8e8); color: #111; border: 2px solid #ccc; font-weight: 600; }
+.white-card.playable, .white-card.pickable { cursor: pointer; }
+.white-card.playable:hover, .white-card.pickable:hover { transform: translateY(-12px) scale(1.05); box-shadow: 0 15px 40px rgba(0,255,247,0.4); }
+.pick-label { position: absolute; bottom: 8px; font-size: 10px; color: var(--cyan); background: rgba(0,0,0,0.8); padding: 2px 8px; border-radius: 4px; }
+#submissionsTable { display: flex; flex-wrap: wrap; justify-content: center; margin: 20px 0; }
+.waiting-text, .czar-message, .submitted-message { padding: 30px; text-align: center; color: rgba(255,255,255,0.7); }
+#handCards { display: flex; flex-wrap: wrap; justify-content: center; margin-top: 30px; }
+
+/* UNO GAME */
+#gameUNO { padding: 20px; justify-content: flex-start; }
+#unoBoard { width: 100%; max-width: 900px; }
+#unoBoard h2 { color: var(--cyan); text-align: center; margin-bottom: 20px; }
+#unoPlayerList { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; margin-bottom: 20px; }
+.uno-player { background: var(--glass); border: 2px solid rgba(255,255,255,0.2); border-radius: 12px; padding: 12px 18px; min-width: 130px; text-align: center; position: relative; }
+.uno-player.current { border-color: var(--cyan); box-shadow: 0 0 20px rgba(0,255,247,0.4); }
+.uno-player.is-me { border-color: var(--orange); }
+.uno-player-name { font-weight: 600; margin-bottom: 4px; }
+.uno-player-cards { font-size: 0.85em; color: rgba(255,255,255,0.7); }
+.turn-arrow { position: absolute; right: -20px; top: 50%; transform: translateY(-50%); color: var(--cyan); font-size: 1.2em; }
+.challenge-btn { margin-top: 8px; padding: 5px 10px; font-size: 0.75em; background: var(--red); color: #fff; border-radius: 6px; }
+
+#unoCenter { display: flex; justify-content: center; align-items: center; gap: 40px; margin: 25px 0; }
+.uno-deck { width: 100px; height: 140px; background: linear-gradient(145deg, #2a2a3a, #1a1a2a); border: 3px solid var(--purple); border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: bold; text-align: center; transition: all 0.3s; }
+.uno-deck:hover { transform: scale(1.05); }
+.uno-deck.can-draw { border-color: var(--cyan); box-shadow: 0 0 20px rgba(0,255,247,0.4); }
+
+.uno-card { width: 100px; height: 140px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 2.5em; font-weight: bold; border: 3px solid rgba(255,255,255,0.3); }
+.uno-card.red { background: var(--uno-red); color: #fff; }
+.uno-card.blue { background: var(--uno-blue); color: #fff; }
+.uno-card.green { background: var(--uno-green); color: #fff; }
+.uno-card.yellow { background: var(--uno-yellow); color: #000; }
+.uno-card.wild { background: linear-gradient(135deg, var(--uno-red), var(--uno-blue), var(--uno-green), var(--uno-yellow)); color: #fff; }
+
+#drawStackInfo { display: none; text-align: center; color: var(--red); font-weight: bold; font-size: 1.2em; animation: pulse 0.5s infinite; }
+.turn-indicator { text-align: center; font-size: 1.3em; margin: 15px 0; color: rgba(255,255,255,0.6); }
+.turn-indicator.my-turn { color: var(--cyan); font-weight: bold; }
+
+#unoHandCards { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 16px; margin-top: 20px; }
+.uno-card-small { width: 60px; height: 90px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.3em; font-weight: bold; cursor: pointer; transition: all 0.2s; border: 2px solid rgba(255,255,255,0.3); }
+.uno-card-small.playable:hover { transform: translateY(-12px) scale(1.1); box-shadow: 0 12px 30px rgba(0,255,247,0.5); }
+.uno-card-small.unplayable { opacity: 0.5; cursor: not-allowed; }
+.uno-card-small.red { background: var(--uno-red); color: #fff; }
+.uno-card-small.blue { background: var(--uno-blue); color: #fff; }
+.uno-card-small.green { background: var(--uno-green); color: #fff; }
+.uno-card-small.yellow { background: var(--uno-yellow); color: #000; }
+.uno-card-small.wild { background: linear-gradient(135deg, var(--uno-red), var(--uno-blue), var(--uno-green), var(--uno-yellow)); color: #fff; }
+
+/* CHAT */
+.chat-panel { position: fixed; top: 0; right: 0; width: 280px; height: 100vh; background: var(--glass); border-left: 3px solid var(--cyan); display: flex; flex-direction: column; z-index: 80; }
+.chat-panel.hidden { transform: translateX(100%); }
+.chat-header { padding: 15px; background: rgba(0,0,0,0.5); font-weight: bold; text-align: center; }
+.chat-box { flex: 1; overflow-y: auto; padding: 12px; }
+.chat-message { margin-bottom: 10px; padding: 10px; background: rgba(0,0,0,0.4); border-radius: 8px; word-wrap: break-word; font-size: 0.9em; }
+.chat-message strong { color: var(--cyan); }
+.chat-input { padding: 12px; display: flex; gap: 8px; }
+.chat-input input { flex: 1; padding: 10px; }
+
+/* ADMIN */
+#adminBtn { position: fixed; bottom: 20px; left: 20px; z-index: 100; background: #333; color: #fff; padding: 10px 16px; }
+#adminPanel { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--glass); border: 3px solid var(--orange); border-radius: 20px; padding: 30px; z-index: 300; min-width: 320px; }
+#adminPanel h3 { color: var(--orange); margin-bottom: 20px; display: flex; justify-content: space-between; }
+#adminPanel .close-btn { background: none; color: #fff; font-size: 1.5em; padding: 0 10px; }
+#adminPanel .controls { display: flex; flex-direction: column; gap: 12px; }
+#adminPanel button { width: 100%; }
+
+/* MODAL */
+#customModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 500; align-items: center; justify-content: center; }
+.modal-content { background: var(--glass); border: 3px solid var(--cyan); border-radius: 20px; padding: 30px; max-width: 420px; width: 90%; }
+.modal-content h3 { color: var(--cyan); margin-bottom: 15px; }
+.modal-content p { margin-bottom: 20px; }
+.modal-content input { width: 100%; margin-bottom: 20px; }
+.modal-buttons { display: flex; gap: 12px; }
+.modal-buttons button { flex: 1; }
+.color-selector { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.color-btn { height: 60px; border-radius: 10px; font-weight: bold; border: 3px solid transparent; cursor: pointer; }
+.color-btn:hover { border-color: #fff; }
+.color-btn.red { background: var(--uno-red); color: #fff; }
+.color-btn.blue { background: var(--uno-blue); color: #fff; }
+.color-btn.green { background: var(--uno-green); color: #fff; }
+.color-btn.yellow { background: var(--uno-yellow); color: #000; }
+
+/* OVERLAY */
+#winnerOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 250; align-items: center; justify-content: center; flex-direction: column; cursor: pointer; }
+#overlayText { color: var(--cyan); font-size: 2.8em; font-weight: bold; text-align: center; text-shadow: 0 0 50px var(--cyan); animation: pulse 1s infinite; }
+#winnerOverlay small { color: var(--orange); margin-top: 20px; }
+
+/* TOAST */
+#toastContainer { position: fixed; bottom: 80px; right: 20px; z-index: 400; }
+.toast { background: var(--glass); border: 2px solid var(--cyan); padding: 12px 20px; border-radius: 10px; margin-top: 10px; animation: slideIn 0.3s; }
+.toast.fade-out { opacity: 0; transition: opacity 0.3s; }
+@keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* YOUTUBE */
+#ytPlayer { position: fixed; bottom: 20px; right: 20px; width: 280px; height: 80px; border: 2px solid var(--cyan); border-radius: 10px; z-index: 80; display: none; }
+
+@media (max-width: 900px) {
+  .game-content { padding-left: 20px; }
+  .scoreboard { display: none; }
+  .chat-panel { width: 100%; top: auto; bottom: 0; height: 50vh; border-left: none; border-top: 3px solid var(--cyan); }
+}
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<div id="home" class="screen">
+  <div class="container">
+    <h1>🔥 Lolcow Fire<br>GAME LOBBY 🔥</h1>
+    <input id="nameInput" type="text" placeholder="Enter Username" maxlength="15">
+    <br><br>
+    <button class="btn-primary" onclick="showGameSelection()">🎮 New Game</button>
+    <br>
+    <button class="btn-secondary" onclick="showJoinRoom()">🔑 Join Room</button>
+    <div id="connectionStatus" class="status-connected">🟢 Connected</div>
+  </div>
+</div>
+
+<!-- GAME SELECTION -->
+<div id="gameSelection" class="screen">
+  <h1>Select a Game</h1>
+  <div class="game-grid">
+    <div class="game-card" onclick="selectGame('cards-against')">
+      <h2>🃏 Cards Against The LCU</h2>
+      <p>Hilarious card combos! 3+ players</p>
+    </div>
+    <div class="game-card" onclick="selectGame('uno')">
+      <h2>🎴 UNO</h2>
+      <p>Classic card game! 2-10 players</p>
+    </div>
+  </div>
+  <button class="btn" onclick="goHome()" style="margin-top:30px">← Back</button>
+</div>
+
+<!-- LOBBY -->
+<div id="lobby" class="screen">
+  <h2 id="lobbyGameTitle">🎮 Game Lobby</h2>
+  
+  <div class="room-code-box">
+    <h3>Room Code:</h3>
+    <div id="roomCodeDisplay">------</div>
+    <small>Share this code with friends!</small>
+  </div>
+  
+  <div id="playerList"></div>
+  
+  <div id="lobbyStatus"></div>
+  
+  <button id="readyBtn" class="btn btn-ready" onclick="toggleReady()">✅ Ready Up</button>
+  
+  <button class="btn" onclick="goHome()" style="margin-top:20px">← Leave</button>
+</div>
+
+<!-- COUNTDOWN OVERLAY -->
+<div id="countdownOverlay">
+  <div class="countdown-number">30</div>
+  <p>Game starting...</p>
+</div>
+
+<!-- CAH GAME -->
+<div id="gameCAH" class="screen">
+  <div class="game-header">
+    👑 Card Czar: <strong id="czarName">...</strong>
+  </div>
+  
+  <div class="scoreboard">
+    <h4>🏆 Scores</h4>
+    <div id="scoreList"></div>
+  </div>
+  
+  <div class="game-content">
+    <div id="blackCard"></div>
+    <div id="submissionsTable"></div>
+    <div id="handCards"></div>
+  </div>
+  
+  <div class="chat-panel">
+    <div class="chat-header">💬 Chat</div>
+    <div class="chat-box" id="chatBox"></div>
+    <div class="chat-input">
+      <input id="chatInput" placeholder="Message..." maxlength="200">
+      <button class="btn-primary" onclick="sendMsg()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- UNO GAME -->
+<div id="gameUNO" class="screen">
+  <div id="unoBoard">
+    <h2>🎴 UNO</h2>
+    
+    <div id="unoPlayerList"></div>
+    
+    <div class="turn-indicator" id="unoTurnIndicator">Waiting...</div>
+    
+    <div id="unoCenter">
+      <div class="uno-deck" id="unoDeck" onclick="drawUnoCard()">
+        DRAW<br><span id="unoDeckCount">108</span>
+      </div>
+      <div class="uno-card" id="unoCurrentCard"></div>
+    </div>
+    
+    <div id="drawStackInfo"></div>
+    
+    <div style="text-align:center; margin: 20px 0;">
+      <button id="unoBtn" class="btn-secondary" onclick="callUno()" style="font-size:1.3em; padding: 15px 40px;">🔥 UNO!</button>
+    </div>
+    
+    <div id="unoHandCards"></div>
+  </div>
+  
+  <div class="chat-panel">
+    <div class="chat-header">💬 Chat</div>
+    <div class="chat-box" id="chatBoxUno"></div>
+    <div class="chat-input">
+      <input id="chatInputUno" placeholder="Message..." maxlength="200">
+      <button class="btn-primary" onclick="sendMsgUno()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADMIN -->
+<button id="adminBtn" onclick="toggleAdmin()">🛠️</button>
+<div id="adminPanel">
+  <h3>🛠️ Admin <button class="close-btn" onclick="closeAdmin()">×</button></h3>
+  <div class="controls">
+    <button class="btn-secondary" onclick="adminReset()">🔄 Reset Game</button>
+    <button class="btn" onclick="adminWipeChat()">🧹 Clear Chat</button>
+    <button class="btn-primary" onclick="adminMusic()">🎵 Music</button>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div id="customModal">
+  <div class="modal-content">
+    <h3 id="modalTitle">Modal</h3>
+    <p id="modalMessage"></p>
+    <input type="text" id="modalInput" style="display:none">
+    <div id="colorSelector" class="color-selector" style="display:none"></div>
+    <div class="modal-buttons">
+      <button id="modalConfirm" class="btn-primary">OK</button>
+      <button id="modalCancel" class="btn" style="display:none">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- WINNER OVERLAY -->
+<div id="winnerOverlay" onclick="dismissOverlay()">
+  <div id="overlayText"></div>
+  <small>Click to dismiss</small>
+</div>
+
+<!-- TOAST -->
+<div id="toastContainer"></div>
+
+<!-- YOUTUBE -->
+<iframe id="ytPlayer" allow="autoplay"></iframe>
+
+<!-- SCRIPTS: main.js MUST load first -->
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+<script src="main.js"></script>
+<script src="game-cah.js"></script>
+<script src="game-uno.js"></script>
+
+</body>
+</html>
