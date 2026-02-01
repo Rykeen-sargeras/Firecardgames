@@ -1,16 +1,14 @@
 // ===========================================
-// CARDS AGAINST THE LCU - Main Client
-// v4.0 - Enhanced UI & Engine
+// CARDS AGAINST THE LCU - Desktop Client
 // ===========================================
 
 const socket = io();
+const BLANK_CARD = "__BLANK__";
 
 // State
 let myName = "";
 let roomCode = "";
 let gameState = {};
-let previewCardData = null;
-let longPressTimer = null;
 let isSubmitting = false;
 let lastActionTime = 0;
 
@@ -117,19 +115,27 @@ function showModal(options) {
     const title = document.getElementById("modalTitle");
     const message = document.getElementById("modalMessage");
     const input = document.getElementById("modalInput");
+    const textarea = document.getElementById("modalTextarea");
     const confirmBtn = document.getElementById("modalConfirm");
     const cancelBtn = document.getElementById("modalCancel");
     
     title.textContent = options.title || "Alert";
     message.textContent = options.message || "";
     
-    if (options.input) {
+    // Hide both input types first
+    input.style.display = "none";
+    textarea.style.display = "none";
+    
+    if (options.textarea) {
+      textarea.style.display = "block";
+      textarea.value = options.inputValue || "";
+      textarea.placeholder = options.placeholder || "";
+      setTimeout(() => textarea.focus(), 100);
+    } else if (options.input) {
       input.style.display = "block";
       input.value = options.inputValue || "";
       input.placeholder = options.placeholder || "";
       setTimeout(() => input.focus(), 100);
-    } else {
-      input.style.display = "none";
     }
     
     cancelBtn.style.display = options.showCancel ? "block" : "none";
@@ -143,9 +149,16 @@ function showModal(options) {
       confirmBtn.onclick = null;
       cancelBtn.onclick = null;
       input.onkeydown = null;
+      textarea.onkeydown = null;
     };
     
-    confirmBtn.onclick = () => { cleanup(); resolve(options.input ? input.value : true); };
+    const getValue = () => {
+      if (options.textarea) return textarea.value;
+      if (options.input) return input.value;
+      return true;
+    };
+    
+    confirmBtn.onclick = () => { cleanup(); resolve(getValue()); };
     cancelBtn.onclick = () => { cleanup(); resolve(null); };
     
     if (options.input) {
@@ -167,6 +180,10 @@ async function customConfirm(message, title = "Confirm") {
 
 async function customPrompt(message, title = "Input", placeholder = "") {
   return await showModal({ title, message, input: true, placeholder, showCancel: true });
+}
+
+async function customTextarea(message, title = "Write", placeholder = "") {
+  return await showModal({ title, message, textarea: true, placeholder, showCancel: true, confirmText: "Submit" });
 }
 
 // ===========================================
@@ -320,6 +337,13 @@ socket.on("game-reset", () => {
   document.getElementById("winnerOverlay").classList.remove("active", "game-over");
 });
 
+socket.on("full-reset", () => {
+  clearSession();
+  showScreen("homeScreen");
+  showToast("Room closed by admin");
+  document.getElementById("winnerOverlay").classList.remove("active", "game-over");
+});
+
 socket.on("game-ended", (data) => {
   showScreen("lobbyScreen");
   showToast(data.reason || "Game ended");
@@ -385,9 +409,7 @@ function renderSubmissions(data) {
       <div class="card-wrapper">
         <div class="white-card flipped ${canPick ? 'pickable' : ''}"
           data-odumid="${s.odumid}"
-          onclick="${canPick ? `pickWinner('${s.odumid}')` : ''}"
-          ontouchstart="touchStartSubmission(event, '${escapeAttr(s.card)}', ${canPick}, '${s.odumid}')"
-          ontouchend="touchEndCard(event)">
+          onclick="${canPick ? `pickWinner('${s.odumid}')` : ''}">
           <div class="card-face card-back"></div>
           <div class="card-face card-front">${escapeHtml(s.card)}</div>
         </div>
@@ -395,8 +417,9 @@ function renderSubmissions(data) {
     `);
   });
   
+  // Fill to 10 slots (5x2)
   while (slots.length < 10) {
-    slots.push('<div class="card-wrapper empty"><div class="white-card"><div class="card-face card-front" style="background:rgba(255,255,255,0.03);border:2px dashed var(--ash)"></div></div></div>');
+    slots.push('<div class="card-wrapper empty"><div class="white-card"><div class="card-face card-front"></div></div></div>');
   }
   
   grid.innerHTML = slots.join("");
@@ -428,16 +451,17 @@ function renderHand(data) {
   hand.innerHTML = data.myHand.map((cardData) => {
     const isRevealed = cardData.revealed;
     const card = cardData.card;
+    const isBlank = card === BLANK_CARD;
     
     return `
       <div class="card-wrapper">
-        <div class="white-card ${isRevealed ? 'flipped playable' : 'blank'}"
+        <div class="white-card ${isRevealed ? 'flipped playable' : ''} ${isBlank && isRevealed ? 'blank-card' : ''}"
           data-index="${cardData.index}"
-          onclick="handleCardClick(${cardData.index}, '${escapeAttr(card)}', ${isRevealed})"
-          ontouchstart="touchStartHand(event, ${cardData.index}, '${escapeAttr(card)}', ${isRevealed})"
-          ontouchend="touchEndCard(event)">
+          data-card="${escapeAttr(card)}"
+          data-blank="${isBlank}"
+          onclick="handleCardClick(${cardData.index}, '${escapeAttr(card)}', ${isRevealed}, ${isBlank})">
           <div class="card-face card-back">?</div>
-          <div class="card-face card-front">${escapeHtml(card)}</div>
+          <div class="card-face card-front">${isBlank ? '✏️ BLANK' : escapeHtml(card)}</div>
         </div>
       </div>
     `;
@@ -447,106 +471,51 @@ function renderHand(data) {
 // ===========================================
 // CARD INTERACTIONS
 // ===========================================
-function handleCardClick(index, card, revealed) {
+async function handleCardClick(index, card, revealed, isBlank) {
   if (!canPerformAction()) return;
   
   if (!revealed) {
+    // Reveal card - optimistic UI
     const cardEl = document.querySelector(`[data-index="${index}"]`);
     if (cardEl) {
-      cardEl.classList.add("flipped");
-      cardEl.classList.remove("blank");
-      cardEl.classList.add("playable");
+      cardEl.classList.add("flipped", "playable");
+      if (isBlank) cardEl.classList.add("blank-card");
     }
     socket.emit("reveal-card", index);
   } else {
-    playCard(index, card);
+    // Play card
+    if (isBlank) {
+      await playBlankCard(index, card);
+    } else {
+      playCard(index, card, null);
+    }
   }
 }
 
-function playCard(index, card) {
-  if (isSubmitting || !canPerformAction()) return;
+async function playBlankCard(index, card) {
+  const customText = await customTextarea(
+    "Write your own answer for this card:",
+    "✏️ Write Your Card",
+    "Type something funny..."
+  );
+  
+  if (customText && customText.trim()) {
+    playCard(index, card, customText.trim());
+  }
+}
+
+function playCard(index, card, customText) {
+  if (isSubmitting) return;
   isSubmitting = true;
   
   document.getElementById("handCards").innerHTML = '<div class="status-msg">✅ Submitting...</div>';
-  socket.emit("submit", { card: card });
+  socket.emit("submit", { card: card, customText: customText });
 }
 
 function pickWinner(odumid) {
   if (!canPerformAction()) return;
-  closePreview();
   socket.emit("pick", odumid);
 }
-
-function touchStartHand(event, index, card, revealed) {
-  event.preventDefault();
-  previewCardData = { index, card, revealed, type: 'hand' };
-  
-  if (!revealed) {
-    handleCardClick(index, card, revealed);
-    return;
-  }
-  
-  longPressTimer = setTimeout(() => {
-    showCardPreview(card, true, null, index);
-  }, 400);
-}
-
-function touchStartSubmission(event, card, canPick, odumid) {
-  event.preventDefault();
-  previewCardData = { card, canPick, odumid, type: 'submission' };
-  
-  longPressTimer = setTimeout(() => {
-    showCardPreview(card, canPick, odumid, null);
-  }, 400);
-}
-
-function touchEndCard(event) {
-  if (longPressTimer) {
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
-  }
-  
-  if (previewCardData && !document.getElementById("cardPreview").classList.contains("active")) {
-    const { type, index, card, revealed, canPick, odumid } = previewCardData;
-    
-    if (type === 'hand' && revealed) {
-      playCard(index, card);
-    } else if (type === 'submission' && canPick) {
-      pickWinner(odumid);
-    }
-  }
-  
-  previewCardData = null;
-}
-
-function showCardPreview(cardText, canAct, odumid, cardIndex) {
-  const preview = document.getElementById("cardPreview");
-  const content = document.getElementById("previewCardContent");
-  const playBtn = document.getElementById("previewPlayBtn");
-  
-  content.textContent = cardText;
-  
-  if (canAct) {
-    playBtn.style.display = "block";
-    playBtn.onclick = () => {
-      if (odumid) pickWinner(odumid);
-      else if (cardIndex !== undefined) playCard(cardIndex, cardText);
-    };
-  } else {
-    playBtn.style.display = "none";
-  }
-  
-  preview.classList.add("active");
-}
-
-function closePreview() {
-  document.getElementById("cardPreview").classList.remove("active");
-  previewCardData = null;
-}
-
-document.getElementById("cardPreview").addEventListener("click", (e) => {
-  if (e.target.id === "cardPreview") closePreview();
-});
 
 // ===========================================
 // REMATCH
@@ -620,35 +589,50 @@ document.getElementById("chatInput").addEventListener("keypress", (e) => {
 });
 
 // ===========================================
-// ADMIN
+// ADMIN - Single password entry
 // ===========================================
+let adminPassword = null;
+
 async function openAdmin() {
-  const pw = await customPrompt("Admin password:", "Admin");
-  if (pw) socket.emit("admin", { pw, action: "login" });
+  if (!adminPassword) {
+    const pw = await customPrompt("Enter admin password:", "Admin Login");
+    if (!pw) return;
+    adminPassword = pw;
+  }
+  
+  socket.emit("admin", { pw: adminPassword, action: "login" });
 }
 
 socket.on("admin-ok", async () => {
-  const action = await showModal({
-    title: "🛠️ Admin",
-    message: "Choose action:",
-    showCancel: true,
-    confirmText: "Reset Game",
-    cancelText: "Clear Chat"
-  });
-  
-  if (action === true) {
-    const pw = await customPrompt("Confirm password:", "Reset");
-    if (pw) socket.emit("admin", { pw, action: "reset" });
-  } else {
-    const confirm = await customConfirm("Clear chat?", "Clear");
-    if (confirm) {
-      const pw = await customPrompt("Confirm password:", "Clear");
-      if (pw) socket.emit("admin", { pw, action: "wipe-chat" });
-    }
-  }
+  showAdminPanel();
 });
 
-socket.on("admin-fail", () => customAlert("Wrong password!", "Denied"));
+socket.on("admin-fail", () => {
+  adminPassword = null;
+  customAlert("Wrong password!", "Access Denied");
+});
+
+async function showAdminPanel() {
+  const result = await showModal({
+    title: "🛠️ Admin Panel",
+    message: "Select an action:",
+    showCancel: true,
+    confirmText: "Reset Game",
+    cancelText: "Dismiss"
+  });
+  
+  if (result === true) {
+    socket.emit("admin", { pw: adminPassword, action: "reset" });
+    showToast("Game reset!");
+  }
+}
+
+function adminClearChat() {
+  if (adminPassword) {
+    socket.emit("admin", { pw: adminPassword, action: "wipe-chat" });
+    showToast("Chat cleared!");
+  }
+}
 
 // ===========================================
 // TOAST & OVERLAYS
@@ -699,16 +683,6 @@ document.getElementById("nameInput").addEventListener("keypress", (e) => {
   const img = new Image();
   img.src = src;
 });
-
-// ===========================================
-// PREVENT DOUBLE TAP ZOOM
-// ===========================================
-let lastTouchEnd = 0;
-document.addEventListener('touchend', (e) => {
-  const now = Date.now();
-  if (now - lastTouchEnd < 300) e.preventDefault();
-  lastTouchEnd = now;
-}, { passive: false });
 
 // ===========================================
 // INIT
