@@ -19,6 +19,7 @@ const WIN_POINTS = 10;
 const COUNTDOWN_SECONDS = 15;
 const RECONNECT_SECONDS = 60;
 const BLANK_CARD = "__BLANK__";
+const HAND_SIZE = 10;
 
 // ===========================================
 // LOAD CARDS
@@ -328,17 +329,22 @@ function startGame(code) {
   
   const ids = Object.keys(room.players).filter(id => room.players[id].name && !room.players[id].disconnected);
   
+  // ALL PLAYERS START WITH BLANK CARDS - cards are "revealed" on selection
   ids.forEach((id, i) => {
     const p = room.players[id];
-    p.hand = [BLANK_CARD];
-    const existing = [BLANK_CARD];
-    for (let j = 0; j < 9; j++) {
+    p.hand = [];
+    p.revealedCards = []; // Track which cards have been revealed
+    
+    // Deal cards but they start as "blank" until revealed
+    const existing = [];
+    for (let j = 0; j < HAND_SIZE; j++) {
       const card = drawWhiteCard(room, existing);
       if (card) {
         p.hand.push(card);
         existing.push(card);
       }
     }
+    
     p.score = 0;
     p.submitted = false;
     p.isCzar = (i === 0);
@@ -367,12 +373,19 @@ function sendGameState(code) {
     
     const sock = io.sockets.sockets.get(id);
     if (sock) {
+      // Send hand with revealed status
+      const handWithStatus = p.hand.map((card, idx) => ({
+        card: card,
+        revealed: p.revealedCards ? p.revealedCards.includes(idx) : false,
+        index: idx
+      }));
+      
       sock.emit("game-state", {
         blackCard: room.currentBlack,
         czarName: czar ? czar.name : "...",
         czarId: czar ? Object.keys(room.players).find(k => room.players[k] === czar) : null,
         isCzar: p.isCzar,
-        myHand: p.hand || [],
+        myHand: handWithStatus,
         submitted: p.submitted,
         submissions: room.submissions.map(s => ({ odumid: s.odumid, card: s.card })),
         allSubmitted: allSubmitted,
@@ -415,9 +428,10 @@ function nextRound(code) {
   // Add pending players
   for (const [id, pending] of Object.entries(room.pendingPlayers || {})) {
     room.players[id] = pending;
-    pending.hand = [BLANK_CARD];
-    const existing = [BLANK_CARD];
-    for (let j = 0; j < 9; j++) {
+    pending.hand = [];
+    pending.revealedCards = [];
+    const existing = [];
+    for (let j = 0; j < HAND_SIZE; j++) {
       const card = drawWhiteCard(room, existing);
       if (card) {
         pending.hand.push(card);
@@ -444,8 +458,10 @@ function nextRound(code) {
   room.czarIndex = (room.czarIndex + 1) % ids.length;
   
   ids.forEach((id, i) => {
-    room.players[id].isCzar = (i === room.czarIndex);
-    room.players[id].submitted = false;
+    const p = room.players[id];
+    p.isCzar = (i === room.czarIndex);
+    p.submitted = false;
+    p.revealedCards = []; // Reset revealed cards each round
   });
   
   room.currentBlack = drawBlackCard(room);
@@ -516,6 +532,21 @@ io.on("connection", (socket) => {
     checkAndStartCountdown(socket.roomCode);
   });
   
+  // Reveal a card (click blank to see what it is)
+  socket.on("reveal-card", (index) => {
+    const room = getRoom(socket.roomCode);
+    if (!room || !room.started) return;
+    
+    const p = room.players[socket.id];
+    if (!p || p.isCzar) return;
+    
+    if (!p.revealedCards) p.revealedCards = [];
+    if (!p.revealedCards.includes(index) && index >= 0 && index < p.hand.length) {
+      p.revealedCards.push(index);
+      sendGameState(socket.roomCode);
+    }
+  });
+  
   socket.on("submit", (data) => {
     const room = getRoom(socket.roomCode);
     if (!room || !room.started) return;
@@ -529,11 +560,14 @@ io.on("connection", (socket) => {
     }
     
     const idx = p.hand.indexOf(data.card);
-    if (idx !== -1) p.hand.splice(idx, 1);
-    else {
-      const blankIdx = p.hand.indexOf(BLANK_CARD);
-      if (blankIdx !== -1) p.hand.splice(blankIdx, 1);
-      else return;
+    if (idx !== -1) {
+      p.hand.splice(idx, 1);
+      // Remove from revealed if it was revealed
+      if (p.revealedCards) {
+        p.revealedCards = p.revealedCards.filter(i => i !== idx).map(i => i > idx ? i - 1 : i);
+      }
+    } else {
+      return;
     }
     
     const newCard = drawWhiteCard(room, p.hand);
