@@ -7,6 +7,8 @@ const socket = io();
 let myName = "";
 let roomCode = "";
 let gameState = {};
+let previewCardData = null;
+let longPressTimer = null;
 
 // ===========================================
 // CONNECTION
@@ -24,6 +26,89 @@ socket.on("disconnect", () => {
 });
 
 // ===========================================
+// CUSTOM MODAL SYSTEM (replaces alert/confirm/prompt)
+// ===========================================
+function showModal(options) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("customModal");
+    const title = document.getElementById("modalTitle");
+    const message = document.getElementById("modalMessage");
+    const input = document.getElementById("modalInput");
+    const confirmBtn = document.getElementById("modalConfirm");
+    const cancelBtn = document.getElementById("modalCancel");
+    
+    title.textContent = options.title || "Alert";
+    message.textContent = options.message || "";
+    
+    // Input field
+    if (options.input) {
+      input.style.display = "block";
+      input.value = options.inputValue || "";
+      input.placeholder = options.placeholder || "";
+      setTimeout(() => input.focus(), 100);
+    } else {
+      input.style.display = "none";
+    }
+    
+    // Cancel button
+    if (options.showCancel) {
+      cancelBtn.style.display = "block";
+    } else {
+      cancelBtn.style.display = "none";
+    }
+    
+    confirmBtn.textContent = options.confirmText || "OK";
+    cancelBtn.textContent = options.cancelText || "Cancel";
+    
+    modal.classList.add("active");
+    
+    const cleanup = () => {
+      modal.classList.remove("active");
+      confirmBtn.onclick = null;
+      cancelBtn.onclick = null;
+      input.onkeydown = null;
+    };
+    
+    confirmBtn.onclick = () => {
+      cleanup();
+      resolve(options.input ? input.value : true);
+    };
+    
+    cancelBtn.onclick = () => {
+      cleanup();
+      resolve(null);
+    };
+    
+    if (options.input) {
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") {
+          cleanup();
+          resolve(input.value);
+        } else if (e.key === "Escape") {
+          cleanup();
+          resolve(null);
+        }
+      };
+    }
+  });
+}
+
+// Helper functions to replace native dialogs
+async function customAlert(message, title = "Notice") {
+  await showModal({ title, message });
+}
+
+async function customConfirm(message, title = "Confirm") {
+  const result = await showModal({ title, message, showCancel: true, confirmText: "Yes", cancelText: "No" });
+  return result === true;
+}
+
+async function customPrompt(message, title = "Input", placeholder = "") {
+  const result = await showModal({ title, message, input: true, placeholder, showCancel: true });
+  return result;
+}
+
+// ===========================================
 // SCREENS
 // ===========================================
 function showScreen(id) {
@@ -38,10 +123,10 @@ function goHome() {
 // ===========================================
 // CREATE / JOIN
 // ===========================================
-function createGame() {
+async function createGame() {
   const name = document.getElementById("nameInput").value.trim();
   if (!name) {
-    showToast("Enter your name first!");
+    await customAlert("Please enter your name first!", "Oops");
     return;
   }
   myName = name;
@@ -52,22 +137,22 @@ function createGame() {
   });
 }
 
-function joinPrompt() {
+async function joinPrompt() {
   const name = document.getElementById("nameInput").value.trim();
   if (!name) {
-    showToast("Enter your name first!");
+    await customAlert("Please enter your name first!", "Oops");
     return;
   }
   myName = name;
   
-  const code = prompt("Enter room code:");
+  const code = await customPrompt("Enter the room code:", "Join Game", "ABC123");
   if (code && code.trim()) {
     roomCode = code.trim().toUpperCase();
     socket.emit("join-room", { code: roomCode, name: myName }, handleJoin);
   }
 }
 
-function handleJoin(res) {
+async function handleJoin(res) {
   if (res.ok) {
     document.getElementById("lobbyCode").textContent = roomCode;
     showScreen("lobbyScreen");
@@ -78,7 +163,7 @@ function handleJoin(res) {
       showToast("Reconnected!");
     }
   } else {
-    showToast(res.error || "Failed to join");
+    await customAlert(res.error || "Failed to join", "Error");
   }
 }
 
@@ -94,7 +179,7 @@ socket.on("lobby", (data) => {
   const list = document.getElementById("playerList");
   
   if (data.players.length === 0) {
-    list.innerHTML = '<div class="no-players">Waiting for players to join...</div>';
+    list.innerHTML = '<div class="status-msg">Waiting for players...</div>';
   } else {
     list.innerHTML = data.players.filter(p => p.name).map(p => {
       let classes = "player-row";
@@ -102,14 +187,12 @@ socket.on("lobby", (data) => {
       if (p.ready) classes += " ready";
       if (p.disconnected) classes += " dc";
       
-      let status = p.disconnected ? `⏱️ ${p.reconnectTime}s` : (p.ready ? "✅ Ready" : "⏳ Waiting");
+      let status = p.disconnected ? `⏱️ ${p.reconnectTime}s` : (p.ready ? "✅ Ready" : "⏳");
       
-      return `
-        <div class="${classes}">
-          <span class="player-name">${p.name}${p.odumid === socket.id ? " (You)" : ""}</span>
-          <span class="player-status">${status}</span>
-        </div>
-      `;
+      return `<div class="${classes}">
+        <span class="player-name">${escapeHtml(p.name)}${p.odumid === socket.id ? " (You)" : ""}</span>
+        <span class="player-status">${status}</span>
+      </div>`;
     }).join("");
   }
   
@@ -133,21 +216,10 @@ function toggleReady() {
 // ===========================================
 // PLAYER EVENTS
 // ===========================================
-socket.on("player-dc", (data) => {
-  showToast(`${data.name} disconnected - ${data.time}s to reconnect`);
-});
-
-socket.on("player-reconnected", (data) => {
-  showToast(`${data.name} reconnected!`);
-});
-
-socket.on("player-left", (data) => {
-  showToast(`${data.name} left`);
-});
-
-socket.on("player-joined-game", (data) => {
-  showToast(`${data.name} joined!`);
-});
+socket.on("player-dc", (data) => showToast(`${data.name} disconnected`));
+socket.on("player-reconnected", (data) => showToast(`${data.name} reconnected!`));
+socket.on("player-left", (data) => showToast(`${data.name} left`));
+socket.on("player-joined-game", (data) => showToast(`${data.name} joined!`));
 
 // ===========================================
 // GAME
@@ -174,7 +246,7 @@ socket.on("game-ended", (data) => {
 });
 
 socket.on("round-winner", (data) => {
-  showWinner(`🎉 ${data.name} wins the round! (${data.score} pts)`);
+  showWinner(`🎉 ${data.name} wins! (${data.score} pts)`);
 });
 
 socket.on("game-winner", (data) => {
@@ -195,10 +267,7 @@ socket.on("game-winner", (data) => {
 function renderGame() {
   const data = gameState;
   
-  // Black card
   document.getElementById("blackCard").textContent = data.blackCard || "...";
-  
-  // Czar & round
   document.getElementById("czarName").textContent = data.czarName || "...";
   document.getElementById("roundNum").textContent = data.roundNumber || 1;
   
@@ -206,19 +275,13 @@ function renderGame() {
   document.getElementById("scoreboard").innerHTML = data.players.map(p => {
     let classes = "score-row";
     if (p.isCzar) classes += " czar";
-    if (p.submitted) classes += " submitted";
-    return `
-      <div class="${classes}">
-        <span>${p.name}${p.isCzar ? " 👑" : ""}</span>
-        <span>${p.score}</span>
-      </div>
-    `;
+    return `<div class="${classes}">
+      <span>${escapeHtml(p.name)}${p.isCzar ? " 👑" : ""}</span>
+      <span>${p.score}</span>
+    </div>`;
   }).join("");
   
-  // Submissions grid (5x5)
   renderSubmissions(data);
-  
-  // Hand
   renderHand(data);
 }
 
@@ -226,32 +289,24 @@ function renderSubmissions(data) {
   const grid = document.getElementById("submissionGrid");
   const slots = [];
   
-  // Submissions
   data.submissions.forEach(s => {
     const canPick = data.isCzar && data.allSubmitted;
-    slots.push(`
-      <div class="white-card ${canPick ? 'clickable' : ''}" 
-           ${canPick ? `onclick="pickWinner('${s.odumid}')"` : ''}>
-        ${escapeHtml(s.card)}
-      </div>
-    `);
+    slots.push(`<div class="white-card ${canPick ? 'clickable' : ''}" 
+      ${canPick ? `onclick="pickWinner('${s.odumid}')"` : ''}
+      onmouseenter="hoverCard(this)"
+      onmouseleave="unhoverCard(this)"
+      ontouchstart="touchStartCard(event, '${escapeAttr(s.card)}', ${canPick}, '${s.odumid}')"
+      ontouchend="touchEndCard(event)">
+      ${escapeHtml(s.card)}
+    </div>`);
   });
   
-  // Fill to minimum 5 slots
-  const minSlots = Math.max(5, data.expectedCount || 0);
-  while (slots.length < minSlots) {
+  // Fill to 10 slots (5x2)
+  while (slots.length < 10) {
     slots.push('<div class="white-card empty"></div>');
   }
   
   grid.innerHTML = slots.join("");
-  
-  // Status
-  if (!data.allSubmitted && data.submissionCount !== undefined) {
-    const remaining = data.expectedCount - data.submissionCount;
-    if (remaining > 0 && !data.isCzar) {
-      grid.innerHTML += `<div class="status-msg" style="grid-column:1/-1">Waiting for ${remaining} more submission${remaining > 1 ? 's' : ''}...</div>`;
-    }
-  }
 }
 
 function renderHand(data) {
@@ -263,7 +318,7 @@ function renderHand(data) {
   }
   
   if (data.isCzar) {
-    hand.innerHTML = '<div class="status-msg">👑 You\'re the Card Czar! Wait for submissions, then pick the funniest.</div>';
+    hand.innerHTML = '<div class="status-msg">👑 You\'re the Card Czar! Pick the funniest card above.</div>';
     return;
   }
   
@@ -277,41 +332,148 @@ function renderHand(data) {
     return;
   }
   
-  hand.innerHTML = data.myHand.map((card, i) => `
-    <div class="white-card clickable" onclick="playCard(${i}, '${escapeAttr(card)}')">
-      ${card === "__BLANK__" ? "✏️ BLANK CARD" : escapeHtml(card)}
-    </div>
-  `).join("");
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function escapeAttr(str) {
-  return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
-}
-
-function playCard(index, card) {
-  if (card === "__BLANK__") {
-    const custom = prompt("Write your own card:");
-    if (custom && custom.trim()) {
-      socket.emit("submit", { card: "__BLANK__", custom: custom.trim() });
+  hand.innerHTML = data.myHand.map((cardData, i) => {
+    const isRevealed = cardData.revealed;
+    const card = cardData.card;
+    
+    if (!isRevealed) {
+      // Blank card - tap to reveal
+      return `<div class="white-card blank-card clickable" 
+        onclick="revealCard(${cardData.index})"
+        ontouchstart="touchStartBlank(event, ${cardData.index})"
+        ontouchend="touchEndCard(event)">
+        ?
+      </div>`;
+    } else {
+      // Revealed card - can play
+      return `<div class="white-card clickable" 
+        onclick="playCard(${cardData.index}, '${escapeAttr(card)}')"
+        onmouseenter="hoverCard(this)"
+        onmouseleave="unhoverCard(this)"
+        ontouchstart="touchStartCard(event, '${escapeAttr(card)}', true, null, ${cardData.index})"
+        ontouchend="touchEndCard(event)">
+        ${escapeHtml(card)}
+      </div>`;
     }
-  } else {
-    socket.emit("submit", { card: card });
-  }
+  }).join("");
 }
 
+// ===========================================
+// CARD INTERACTIONS
+// ===========================================
+
+// Reveal a blank card
+function revealCard(index) {
+  socket.emit("reveal-card", index);
+}
+
+// Play a card
+async function playCard(index, card) {
+  closePreview();
+  socket.emit("submit", { card: card });
+}
+
+// Pick winner (czar only)
 function pickWinner(odumid) {
+  closePreview();
   socket.emit("pick", odumid);
 }
 
+// Desktop hover zoom
+function hoverCard(el) {
+  // Optional: could add tooltip or scale here
+}
+
+function unhoverCard(el) {
+  // Reset hover state
+}
+
+// Touch/long-press for mobile preview
+function touchStartCard(event, cardText, canAct, odumid, cardIndex) {
+  event.preventDefault();
+  
+  previewCardData = { cardText, canAct, odumid, cardIndex };
+  
+  // Long press (500ms) to show preview
+  longPressTimer = setTimeout(() => {
+    showCardPreview(cardText, canAct, odumid, cardIndex);
+  }, 500);
+}
+
+function touchStartBlank(event, index) {
+  event.preventDefault();
+  // Immediate reveal on tap
+  revealCard(index);
+}
+
+function touchEndCard(event) {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+  
+  // Quick tap - perform action
+  if (previewCardData && !document.getElementById("cardPreview").classList.contains("active")) {
+    const { canAct, odumid, cardIndex, cardText } = previewCardData;
+    if (canAct) {
+      if (odumid) {
+        pickWinner(odumid);
+      } else if (cardIndex !== undefined && cardIndex !== null) {
+        playCard(cardIndex, cardText);
+      }
+    }
+  }
+  
+  previewCardData = null;
+}
+
+// Card preview modal
+function showCardPreview(cardText, canAct, odumid, cardIndex) {
+  const preview = document.getElementById("cardPreview");
+  const content = document.getElementById("previewCardContent");
+  const playBtn = document.getElementById("previewPlayBtn");
+  
+  content.textContent = cardText;
+  
+  if (canAct) {
+    playBtn.style.display = "block";
+    playBtn.onclick = () => {
+      if (odumid) {
+        pickWinner(odumid);
+      } else if (cardIndex !== undefined) {
+        playCard(cardIndex, cardText);
+      }
+    };
+  } else {
+    playBtn.style.display = "none";
+  }
+  
+  preview.classList.add("active");
+}
+
+function closePreview() {
+  document.getElementById("cardPreview").classList.remove("active");
+  previewCardData = null;
+}
+
+// Close preview on background click
+document.getElementById("cardPreview").addEventListener("click", (e) => {
+  if (e.target.id === "cardPreview") {
+    closePreview();
+  }
+});
+
 // ===========================================
-// CHAT - ACCORDION
+// CHAT
 // ===========================================
 function toggleChat() {
   document.getElementById("chatContainer").classList.toggle("open");
+  
+  // Scroll to bottom when opening
+  if (document.getElementById("chatContainer").classList.contains("open")) {
+    const messages = document.getElementById("chatMessages");
+    messages.scrollTop = messages.scrollHeight;
+  }
 }
 
 function sendChat() {
@@ -328,9 +490,11 @@ socket.on("chat", (data) => {
   div.className = "chat-msg";
   div.innerHTML = `<b>${escapeHtml(data.name)}:</b> ${escapeHtml(data.msg)}`;
   box.appendChild(div);
+  
+  // Auto-scroll to bottom
   box.scrollTop = box.scrollHeight;
   
-  // Flash if closed
+  // Flash header if closed
   if (!document.getElementById("chatContainer").classList.contains("open")) {
     const header = document.querySelector(".chat-header");
     header.style.boxShadow = "0 0 20px #ff5722";
@@ -342,45 +506,43 @@ socket.on("chat-clear", () => {
   document.getElementById("chatMessages").innerHTML = "";
 });
 
-// Enter key for chat
-document.addEventListener("keypress", (e) => {
-  if (e.key === "Enter") {
-    if (e.target.id === "nameInput") createGame();
-    if (e.target.id === "chatInput") sendChat();
-  }
+document.getElementById("chatInput").addEventListener("keypress", (e) => {
+  if (e.key === "Enter") sendChat();
 });
 
 // ===========================================
 // ADMIN
 // ===========================================
-function openAdmin() {
-  const pw = prompt("Admin password:");
+async function openAdmin() {
+  const pw = await customPrompt("Enter admin password:", "Admin Login", "");
   if (pw) socket.emit("admin", { pw: pw, action: "login" });
 }
 
-socket.on("admin-ok", () => {
-  document.getElementById("adminPanel").classList.add("active");
+socket.on("admin-ok", async () => {
+  const action = await showModal({
+    title: "🛠️ Admin Panel",
+    message: "Select an action:",
+    showCancel: true,
+    confirmText: "Reset Game",
+    cancelText: "Clear Chat"
+  });
+  
+  if (action === true) {
+    const pw = await customPrompt("Confirm password to reset:", "Reset Game");
+    if (pw) socket.emit("admin", { pw, action: "reset" });
+  } else if (action === null) {
+    // Cancel was clicked - check if they want to clear chat
+    const confirm = await customConfirm("Clear all chat messages?", "Clear Chat");
+    if (confirm) {
+      const pw = await customPrompt("Confirm password:", "Clear Chat");
+      if (pw) socket.emit("admin", { pw, action: "wipe-chat" });
+    }
+  }
 });
 
 socket.on("admin-fail", () => {
-  showToast("Wrong password");
+  customAlert("Wrong password!", "Access Denied");
 });
-
-function closeAdmin() {
-  document.getElementById("adminPanel").classList.remove("active");
-}
-
-function adminReset() {
-  const pw = prompt("Confirm password:");
-  if (pw) socket.emit("admin", { pw: pw, action: "reset" });
-  closeAdmin();
-}
-
-function adminWipeChat() {
-  const pw = prompt("Confirm password:");
-  if (pw) socket.emit("admin", { pw: pw, action: "wipe-chat" });
-  closeAdmin();
-}
 
 // ===========================================
 // TOAST & OVERLAYS
@@ -400,6 +562,35 @@ function showWinner(msg) {
 }
 
 // ===========================================
+// UTILITIES
+// ===========================================
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function escapeAttr(str) {
+  if (!str) return '';
+  return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/</g, '&lt;');
+}
+
+// ===========================================
+// KEYBOARD
+// ===========================================
+document.getElementById("nameInput").addEventListener("keypress", (e) => {
+  if (e.key === "Enter") createGame();
+});
+
+// ===========================================
 // INIT
 // ===========================================
 showScreen("homeScreen");
+
+// Prevent zoom on double-tap (iOS)
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - (window.lastTouchEnd || 0) < 300) {
+    e.preventDefault();
+  }
+  window.lastTouchEnd = now;
+}, { passive: false });
