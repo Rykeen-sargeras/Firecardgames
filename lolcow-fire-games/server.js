@@ -90,7 +90,13 @@ function shuffle(arr) {
 }
 
 function generateCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+  // No 0 or O to avoid confusion
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ123456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
 }
 
 // ===========================================
@@ -411,6 +417,8 @@ function stopRoundTimer(code) {
 // ===========================================
 // GAME
 // ===========================================
+const BLANK_CARD = "__BLANK__";
+
 function startGame(code) {
   const room = getRoom(code);
   if (!room) return;
@@ -429,8 +437,12 @@ function startGame(code) {
     p.hand = [];
     p.revealedCards = [];
     
+    // First card is always a BLANK card
+    p.hand.push(BLANK_CARD);
+    
+    // Fill rest with regular cards
     const existing = [];
-    for (let j = 0; j < HAND_SIZE; j++) {
+    for (let j = 1; j < HAND_SIZE; j++) {
       const card = drawWhiteCard(room, existing);
       if (card) {
         p.hand.push(card);
@@ -575,7 +587,7 @@ function nextRound(code) {
 }
 
 // ===========================================
-// REMATCH
+// REMATCH (keeps players)
 // ===========================================
 function rematch(code) {
   const room = getRoom(code);
@@ -604,6 +616,36 @@ function rematch(code) {
   
   io.to(code).emit("game-reset");
   broadcastLobby(code);
+}
+
+// ===========================================
+// FULL RESET (kicks everyone, destroys room)
+// ===========================================
+function fullReset(code) {
+  const room = getRoom(code);
+  if (!room) return;
+  
+  stopRoundTimer(code);
+  
+  if (room.countdownTimer) {
+    clearInterval(room.countdownTimer);
+    room.countdownTimer = null;
+  }
+  
+  // Kick everyone back to home
+  io.to(code).emit("full-reset");
+  
+  // Clear all player sessions for this room
+  for (const [sid, sess] of Object.entries(playerSessions)) {
+    if (sess.roomCode === code) {
+      delete playerSessions[sid];
+    }
+  }
+  
+  // Delete the room entirely
+  delete rooms[code];
+  
+  console.log(`Room ${code} fully reset and destroyed`);
 }
 
 // ===========================================
@@ -706,6 +748,11 @@ io.on("connection", (socket) => {
     
     let cardText = data.card;
     
+    // Handle blank card with custom text
+    if (data.card === BLANK_CARD && data.customText) {
+      cardText = filter.clean(data.customText.substring(0, 100));
+    }
+    
     const idx = p.hand.indexOf(data.card);
     if (idx !== -1) {
       p.hand.splice(idx, 1);
@@ -719,7 +766,10 @@ io.on("connection", (socket) => {
     const newCard = drawWhiteCard(room, p.hand);
     if (newCard) p.hand.push(newCard);
     
-    room.whiteDiscard.push(data.card);
+    // Don't discard blank cards
+    if (data.card !== BLANK_CARD) {
+      room.whiteDiscard.push(data.card);
+    }
     
     p.submitted = true;
     room.submissions.push({ odumid: socket.id, card: cardText, name: p.name });
@@ -793,7 +843,7 @@ io.on("connection", (socket) => {
     if (!room) return;
     
     if (data.action === "reset") {
-      rematch(socket.roomCode);
+      fullReset(socket.roomCode);
     }
     if (data.action === "wipe-chat") {
       io.to(socket.roomCode).emit("chat-clear");
