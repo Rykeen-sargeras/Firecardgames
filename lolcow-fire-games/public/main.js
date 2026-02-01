@@ -11,6 +11,7 @@ let roomCode = "";
 let gameState = {};
 let isSubmitting = false;
 let lastActionTime = 0;
+let adminPassword = null;
 
 // Session persistence
 const SESSION_KEY = 'cah_session';
@@ -122,7 +123,6 @@ function showModal(options) {
     title.textContent = options.title || "Alert";
     message.textContent = options.message || "";
     
-    // Hide both input types first
     input.style.display = "none";
     textarea.style.display = "none";
     
@@ -149,7 +149,6 @@ function showModal(options) {
       confirmBtn.onclick = null;
       cancelBtn.onclick = null;
       input.onkeydown = null;
-      textarea.onkeydown = null;
     };
     
     const getValue = () => {
@@ -403,23 +402,23 @@ function renderSubmissions(data) {
   const grid = document.getElementById("submissionGrid");
   const slots = [];
   
+  // Submitted cards show face-up with text visible (anonymous - no names shown)
   data.submissions.forEach((s) => {
     const canPick = data.isCzar && data.allSubmitted;
     slots.push(`
       <div class="card-wrapper">
-        <div class="white-card flipped ${canPick ? 'pickable' : ''}"
+        <div class="white-card submitted ${canPick ? 'pickable' : ''}"
           data-odumid="${s.odumid}"
           onclick="${canPick ? `pickWinner('${s.odumid}')` : ''}">
-          <div class="card-face card-back"></div>
-          <div class="card-face card-front">${escapeHtml(s.card)}</div>
+          <div class="card-text">${escapeHtml(s.card)}</div>
         </div>
       </div>
     `);
   });
   
-  // Fill to 10 slots (5x2)
+  // Fill empty slots
   while (slots.length < 10) {
-    slots.push('<div class="card-wrapper empty"><div class="white-card"><div class="card-face card-front"></div></div></div>');
+    slots.push('<div class="card-wrapper empty"><div class="white-card"><div class="card-text"></div></div></div>');
   }
   
   grid.innerHTML = slots.join("");
@@ -591,8 +590,6 @@ document.getElementById("chatInput").addEventListener("keypress", (e) => {
 // ===========================================
 // ADMIN - Single password entry
 // ===========================================
-let adminPassword = null;
-
 async function openAdmin() {
   if (!adminPassword) {
     const pw = await customPrompt("Enter admin password:", "Admin Login");
@@ -624,13 +621,6 @@ async function showAdminPanel() {
   if (result === true) {
     socket.emit("admin", { pw: adminPassword, action: "reset" });
     showToast("Game reset!");
-  }
-}
-
-function adminClearChat() {
-  if (adminPassword) {
-    socket.emit("admin", { pw: adminPassword, action: "wipe-chat" });
-    showToast("Chat cleared!");
   }
 }
 
