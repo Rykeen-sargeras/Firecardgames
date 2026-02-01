@@ -29,7 +29,6 @@
     }
     
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    
     html, body { height: 100%; overflow: hidden; }
     
     body {
@@ -38,7 +37,6 @@
       color: var(--text);
       font-weight: 400;
       line-height: 1.5;
-      letter-spacing: 0.01em;
     }
     
     /* ========== ANIMATED FIRE BACKGROUND ========== */
@@ -54,13 +52,11 @@
         var(--bg-dark);
       animation: bgPulse 8s ease-in-out infinite;
     }
-    
     @keyframes bgPulse {
       0%, 100% { filter: brightness(1); }
       50% { filter: brightness(1.1); }
     }
     
-    /* Animated gradient orbs */
     .fire-orb {
       position: absolute;
       border-radius: 50%;
@@ -72,7 +68,6 @@
       width: 400px; height: 400px;
       background: radial-gradient(circle, var(--fire-red) 0%, transparent 70%);
       bottom: -100px; left: 10%;
-      animation-delay: 0s;
     }
     .fire-orb:nth-child(2) {
       width: 300px; height: 300px;
@@ -86,13 +81,11 @@
       bottom: 0; left: 50%;
       animation-delay: -6s;
     }
-    
     @keyframes orbFloat {
       0%, 100% { transform: translateY(0) scale(1); }
       50% { transform: translateY(-30px) scale(1.1); }
     }
     
-    /* Ember particles */
     .ember-particle {
       position: absolute;
       width: 4px; height: 4px;
@@ -118,13 +111,6 @@
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
     
-    /* ========== TYPOGRAPHY ========== */
-    h1, h2, h3, .title {
-      font-family: 'Bebas Neue', sans-serif;
-      letter-spacing: 0.05em;
-      font-weight: 400;
-    }
-    
     /* ========== BUTTONS ========== */
     button {
       font-family: 'Space Grotesk', sans-serif;
@@ -141,47 +127,31 @@
       min-width: 48px;
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
-      position: relative;
-      overflow: hidden;
     }
-    
-    button::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(rgba(255,255,255,0.2), transparent);
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-    button:hover::after { opacity: 1; }
-    button:active { transform: scale(0.97); }
-    button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    button:hover:not(:disabled) { transform: translateY(-2px); }
+    button:active:not(:disabled) { transform: scale(0.97); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
     
     .btn-fire {
       background: linear-gradient(135deg, var(--fire-red), var(--fire-orange));
       color: #fff;
       box-shadow: 0 4px 20px var(--glow-red);
     }
-    .btn-fire:hover { box-shadow: 0 6px 30px var(--glow-red), 0 0 50px var(--glow-orange); }
-    
     .btn-ember {
       background: linear-gradient(135deg, var(--ember), var(--gold));
       color: #1a1311;
     }
-    
     .btn-glass {
       background: var(--glass);
       backdrop-filter: blur(10px);
       color: var(--text);
       border: 1px solid var(--glass-border);
     }
-    
     .btn-ready {
       background: linear-gradient(135deg, #22c55e, #16a34a);
       color: #fff;
       font-size: 16px;
       padding: 16px 40px;
-      box-shadow: 0 4px 20px rgba(34, 197, 94, 0.4);
     }
     
     /* ========== INPUTS ========== */
@@ -250,6 +220,7 @@
     }
     
     .home-title {
+      font-family: 'Bebas Neue', sans-serif;
       font-size: 3em;
       letter-spacing: 0.1em;
       background: linear-gradient(135deg, var(--ember), var(--gold));
@@ -282,6 +253,7 @@
     #lobbyScreen { max-width: 480px; width: 100%; }
     
     .lobby-title {
+      font-family: 'Bebas Neue', sans-serif;
       font-size: 2.2em;
       color: var(--ember);
       margin-bottom: 20px;
@@ -325,7 +297,6 @@
       background: rgba(0,0,0,0.3);
       border-radius: 10px;
       border-left: 4px solid var(--ash);
-      transition: all 0.3s;
     }
     .player-row.me { border-left-color: var(--ember); background: rgba(255, 138, 80, 0.1); }
     .player-row.ready { border-left-color: #22c55e; }
@@ -338,7 +309,6 @@
       color: var(--ember);
       min-height: 24px;
     }
-    
     .lobby-buttons { display: flex; flex-direction: column; gap: 12px; align-items: center; }
     .lobby-buttons button { width: 100%; max-width: 280px; }
     
@@ -388,7 +358,6 @@
     .czar-info { font-size: 14px; }
     .czar-info span { color: var(--ember); font-weight: 600; }
     
-    /* ROUND TIMER */
     .round-timer {
       display: flex;
       align-items: center;
@@ -427,7 +396,6 @@
       background: rgba(0,0,0,0.3);
       border-radius: 8px;
       font-size: 13px;
-      transition: all 0.3s;
     }
     .score-row.czar { 
       background: linear-gradient(135deg, rgba(255,138,80,0.2), rgba(255,193,7,0.1));
@@ -444,10 +412,7 @@
     }
     
     /* PROGRESS BAR */
-    .progress-container {
-      margin-bottom: 15px;
-      text-align: center;
-    }
+    .progress-container { margin-bottom: 15px; text-align: center; }
     .progress-bar {
       height: 6px;
       background: rgba(255,255,255,0.1);
@@ -462,10 +427,7 @@
       transition: width 0.5s ease;
       box-shadow: 0 0 10px var(--glow-orange);
     }
-    .progress-text {
-      font-size: 12px;
-      color: var(--text-dim);
-    }
+    .progress-text { font-size: 12px; color: var(--text-dim); }
     
     /* BLACK CARD */
     .black-card-container { text-align: center; margin-bottom: 20px; flex-shrink: 0; }
@@ -473,37 +435,41 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      background: url('blkcard.png') center/cover no-repeat, #0a0a0a;
+      background-image: url('blkcard.png');
+      background-size: cover;
+      background-position: center;
+      background-color: #0a0a0a;
       color: #fff;
       border: 2px solid var(--ember);
       border-radius: 16px;
       padding: 25px 20px;
-      font-size: clamp(15px, 3vw, 18px);
+      font-size: clamp(14px, 2.5vw, 18px);
       font-weight: 600;
       min-width: 240px;
       max-width: 320px;
-      min-height: 140px;
+      min-height: 160px;
       text-align: center;
       line-height: 1.5;
       box-shadow: 0 10px 40px rgba(0,0,0,0.5), 0 0 30px var(--glow-red);
     }
     
-    /* SUBMISSION GRID */
+    /* ========== SUBMISSION GRID - 5 columns DESKTOP ========== */
     #submissionGrid {
       display: grid;
       grid-template-columns: repeat(5, 1fr);
-      grid-template-rows: repeat(2, 1fr);
       gap: 12px;
       flex: 1;
       min-height: 0;
       overflow-y: auto;
       padding: 5px;
+      align-content: start;
     }
     
     /* ========== WHITE CARDS WITH FLIP ========== */
     .card-wrapper {
+      aspect-ratio: 2.5/3.5;
       perspective: 1000px;
-      aspect-ratio: 3/4;
+      min-height: 120px;
     }
     
     .white-card {
@@ -521,75 +487,74 @@
       position: absolute;
       inset: 0;
       backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
       border-radius: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
       text-align: center;
-      padding: 10px 8px;
-      font-size: clamp(10px, 1.5vw, 12px);
+      padding: 12px 10px;
+      font-size: clamp(11px, 1.2vw, 14px);
       font-weight: 500;
       line-height: 1.3;
       word-break: break-word;
       box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
     
+    /* WHITE CARD FRONT */
     .card-front {
-      background: url('whitecard.png') center/cover no-repeat, #f5f3f0;
+      background-image: url('whitecard.png');
+      background-size: cover;
+      background-position: center;
+      background-color: #f5f3f0;
       color: #1a1311;
-    }
-    
-    .card-back {
-      background: url('cardsback.png') center/cover no-repeat, linear-gradient(135deg, var(--bg-card), var(--smoke));
       transform: rotateY(180deg);
+    }
+    
+    /* CARD BACK */
+    .card-back {
+      background-image: url('cardsback.png');
+      background-size: cover;
+      background-position: center;
+      background-color: var(--bg-card);
       border: 2px solid var(--ash);
-    }
-    
-    /* Blank/hidden card */
-    .white-card.blank .card-back {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .white-card.blank .card-back::after {
-      content: 'TAP TO REVEAL';
-      font-size: 10px;
       color: var(--ember);
-      letter-spacing: 0.1em;
+      font-size: 24px;
     }
     
-    /* Playable card glow pulse */
+    .white-card.blank .card-back::after {
+      content: 'TAP';
+      position: absolute;
+      bottom: 10px;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: var(--ember);
+    }
+    
+    /* Playable glow */
     .white-card.playable {
       cursor: pointer;
       animation: cardGlow 2s ease-in-out infinite;
     }
     @keyframes cardGlow {
       0%, 100% { filter: drop-shadow(0 0 5px transparent); }
-      50% { filter: drop-shadow(0 0 15px var(--glow-orange)); }
+      50% { filter: drop-shadow(0 0 20px var(--glow-orange)); }
     }
     
-    .white-card.playable:hover {
-      transform: rotateY(180deg) translateY(-8px) scale(1.05);
+    .white-card.playable:hover,
+    .white-card.pickable:hover {
       animation: none;
-      filter: drop-shadow(0 15px 30px var(--glow-orange));
-    }
-    .white-card.playable.flipped:hover {
-      transform: rotateY(180deg) translateY(-8px) scale(1.05);
+      filter: drop-shadow(0 15px 40px var(--glow-orange));
+      transform: rotateY(180deg) scale(1.08);
     }
     
     .white-card.pickable {
       cursor: pointer;
       animation: cardGlow 2s ease-in-out infinite;
     }
-    .white-card.pickable:hover {
-      transform: translateY(-8px) scale(1.05);
-      filter: drop-shadow(0 15px 30px var(--glow-orange));
-    }
     
-    .card-wrapper.empty .white-card {
-      transform: none;
-    }
-    .card-wrapper.empty .card-front {
+    .card-wrapper.empty .white-card { transform: none; }
+    .card-wrapper.empty .card-face {
       background: rgba(255,255,255,0.03);
       border: 2px dashed var(--ash);
       box-shadow: none;
@@ -600,19 +565,17 @@
       flex-shrink: 0;
       padding: 15px 20px;
       border-top: 1px solid var(--glass-border);
-      max-height: 35vh;
+      max-height: 32vh;
       overflow-y: auto;
     }
     
     #handCards {
       display: grid;
       grid-template-columns: repeat(5, 1fr);
-      grid-template-rows: repeat(2, 1fr);
       gap: 10px;
     }
     
-    #handCards .card-wrapper { aspect-ratio: 3/4; }
-    #handCards .card-face { font-size: 11px; }
+    #handCards .card-wrapper { min-height: 100px; }
     
     .status-msg {
       grid-column: 1 / -1;
@@ -639,7 +602,10 @@
     #cardPreview.active { display: flex; }
     
     .preview-card {
-      background: url('whitecard.png') center/cover no-repeat, #f5f3f0;
+      background-image: url('whitecard.png');
+      background-size: cover;
+      background-position: center;
+      background-color: #f5f3f0;
       color: #1a1311;
       border-radius: 20px;
       padding: 35px 30px;
@@ -690,9 +656,8 @@
       color: var(--ember);
       font-size: 28px;
       margin-bottom: 15px;
-      letter-spacing: 0.05em;
     }
-    .modal-box p { margin-bottom: 25px; line-height: 1.6; color: var(--text-dim); }
+    .modal-box p { margin-bottom: 25px; color: var(--text-dim); }
     .modal-box input { width: 100%; margin-bottom: 25px; }
     .modal-buttons { display: flex; gap: 12px; justify-content: center; }
     .modal-buttons button { flex: 1; max-width: 160px; }
@@ -703,31 +668,28 @@
       bottom: 0;
       right: 0;
       width: 100%;
-      max-width: 360px;
-      height: 55vh;
-      max-height: 450px;
+      max-width: 320px;
+      height: 45vh;
+      max-height: 380px;
       display: flex;
       flex-direction: column;
       z-index: 80;
-      transform: translateY(calc(100% - 54px));
+      transform: translateY(calc(100% - 48px));
       transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .chat-container.open { transform: translateY(0); }
     
     .chat-header {
       background: linear-gradient(135deg, var(--fire-red), var(--fire-orange));
-      padding: 14px 20px;
+      padding: 12px 18px;
       cursor: pointer;
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-weight: 600;
-      min-height: 54px;
-      border-radius: 16px 16px 0 0;
-      letter-spacing: 0.05em;
+      min-height: 48px;
+      border-radius: 12px 12px 0 0;
     }
-    .chat-header:hover { filter: brightness(1.1); }
-    
     .chat-arrow { transition: transform 0.4s; }
     .chat-container.open .chat-arrow { transform: rotate(180deg); }
     
@@ -745,47 +707,42 @@
     #chatMessages {
       flex: 1;
       overflow-y: auto;
-      padding: 15px;
+      padding: 10px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
     
     .chat-msg {
-      padding: 12px 14px;
+      padding: 8px 10px;
       background: rgba(0,0,0,0.3);
-      border-radius: 10px;
-      font-size: 13px;
+      border-radius: 6px;
+      font-size: 12px;
       word-break: break-word;
-      animation: msgIn 0.3s ease;
-    }
-    @keyframes msgIn {
-      from { transform: translateY(10px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
     }
     .chat-msg b { color: var(--ember); }
     
     .chat-input-area {
       display: flex;
-      padding: 12px;
-      gap: 10px;
+      padding: 8px;
+      gap: 6px;
       border-top: 1px solid var(--glass-border);
     }
-    .chat-input-area input { flex: 1; padding: 14px 16px; }
+    .chat-input-area input { flex: 1; padding: 10px; font-size: 14px; }
+    .chat-input-area button { padding: 10px 14px; font-size: 12px; }
     
     /* ========== ADMIN ========== */
     #adminBtn {
       position: fixed;
-      bottom: 65px;
-      left: 15px;
+      bottom: 58px;
+      left: 10px;
       z-index: 50;
-      padding: 12px;
+      padding: 8px 12px;
       background: var(--glass);
       border: 1px solid var(--glass-border);
-      backdrop-filter: blur(10px);
       font-size: 12px;
-      opacity: 0.6;
-      border-radius: 12px;
+      opacity: 0.5;
+      border-radius: 8px;
     }
     #adminBtn:hover { opacity: 1; }
     
@@ -798,15 +755,13 @@
       background: var(--bg-panel);
       backdrop-filter: blur(20px);
       border: 1px solid var(--ember);
-      padding: 16px 28px;
-      border-radius: 14px;
+      padding: 12px 20px;
+      border-radius: 10px;
       opacity: 0;
-      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.4s;
       z-index: 400;
       font-size: 14px;
-      text-align: center;
       max-width: 90%;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
     }
     #toast.active { opacity: 1; transform: translateX(-50%) translateY(0); }
     
@@ -820,7 +775,7 @@
       align-items: center;
       justify-content: center;
       flex-direction: column;
-      gap: 30px;
+      gap: 25px;
       padding: 20px;
     }
     #winnerOverlay.active { display: flex; }
@@ -837,59 +792,51 @@
       50% { transform: scale(1.05); }
     }
     
-    #rematchBtn {
-      display: none;
-      margin-top: 20px;
-    }
+    #rematchBtn { display: none; }
     #winnerOverlay.game-over #rematchBtn { display: block; }
     
-    /* ========== RESPONSIVE ========== */
+    /* ========== RESPONSIVE - TABLET (under 900px) ========== */
     @media (max-width: 900px) {
+      .game-sidebar { width: 150px; }
+      #submissionGrid { grid-template-columns: repeat(4, 1fr); }
+      #handCards { grid-template-columns: repeat(4, 1fr); }
+    }
+    
+    /* ========== RESPONSIVE - MOBILE (under 600px) ========== */
+    @media (max-width: 600px) {
       .game-body { flex-direction: column; }
       .game-sidebar { 
         width: 100%; 
         border-right: none;
         border-bottom: 1px solid var(--glass-border);
-        max-height: 80px;
+        max-height: 60px;
         overflow-x: auto;
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 10px 15px;
+        gap: 6px;
+        padding: 8px 10px;
       }
       .game-sidebar h4 { display: none; }
-      .score-row { white-space: nowrap; flex-shrink: 0; }
+      .score-row { white-space: nowrap; flex-shrink: 0; padding: 6px 10px; font-size: 12px; }
       
-      #submissionGrid, #handCards {
-        grid-template-columns: repeat(2, 1fr);
-        grid-template-rows: auto;
-      }
+      #submissionGrid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      #handCards { grid-template-columns: repeat(3, 1fr); gap: 8px; }
       
-      .chat-container { max-width: 100%; height: 60vh; }
-    }
-    
-    @media (max-width: 480px) {
       .game-main { padding: 12px; }
-      #blackCard { min-width: 180px; min-height: 120px; padding: 18px 15px; }
-      #handArea { max-height: 40vh; padding: 12px; }
+      #blackCard { min-width: 180px; min-height: 120px; padding: 15px; }
+      #handArea { max-height: 35vh; padding: 10px; }
+      .card-wrapper { min-height: 90px; }
+      
+      .chat-container { max-width: 100%; }
     }
     
-    /* Touch active state */
+    /* Touch feedback */
     @media (hover: none) {
       .white-card.playable:active,
       .white-card.pickable:active {
-        transform: scale(0.95);
+        transform: rotateY(180deg) scale(0.95) !important;
         filter: brightness(0.9);
       }
-    }
-    
-    /* Preload images */
-    body::after {
-      content: '';
-      position: absolute;
-      width: 0; height: 0;
-      overflow: hidden;
-      background: url('whitecard.png'), url('blkcard.png'), url('cardsback.png');
     }
   </style>
 </head>
@@ -920,7 +867,7 @@
 
   <!-- LOBBY -->
   <div id="lobbyScreen" class="screen">
-    <h1 class="lobby-title title">🔥 GAME LOBBY</h1>
+    <h1 class="lobby-title">🔥 GAME LOBBY</h1>
     <div class="code-box glass">
       <label>ROOM CODE</label>
       <div id="lobbyCode">------</div>
@@ -1008,7 +955,7 @@
     <div class="chat-body">
       <div id="chatMessages"></div>
       <div class="chat-input-area">
-        <input type="text" id="chatInput" placeholder="Type message..." maxlength="200">
+        <input type="text" id="chatInput" placeholder="Message..." maxlength="200">
         <button class="btn-fire" onclick="sendChat()">SEND</button>
       </div>
     </div>
@@ -1032,7 +979,7 @@
   <script>
     // Generate ember particles
     const emberContainer = document.getElementById('emberContainer');
-    for(let i = 0; i < 20; i++) {
+    for(let i = 0; i < 15; i++) {
       const ember = document.createElement('div');
       ember.className = 'ember-particle';
       ember.style.left = Math.random() * 100 + '%';
