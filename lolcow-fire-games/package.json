@@ -1,7 +1,6 @@
 {
   "name": "lolcow-fire-games",
   "version": "3.0.0",
-  "description": "Lolcow Fire Game Lobby - Cards Against The LCU & UNO",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
