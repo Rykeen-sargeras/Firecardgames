@@ -1,176 +1,145 @@
-// ============================================
-// GAME-UNO.JS - UNO Game Logic
-// ============================================
+// ===========================================
+// UNO GAME
+// ===========================================
 
-let unoHand = [];
-let unoMyTurn = false;
-let unoCurrentCard = null;
-let unoPlayers = [];
+let unoState = {};
 
-socket.on('uno-state', (state) => {
-  console.log('🎴 UNO State:', state);
-  
-  if (!state.started) return;
-  
-  unoHand = state.myHand || [];
-  unoMyTurn = state.isMyTurn;
-  unoCurrentCard = state.currentCard;
-  unoPlayers = state.players;
-  currentGameType = 'uno';
-  
-  show('gameUNO');
-  
-  // Players
-  renderUnoPlayers(state.players, state.currentPlayerId);
-  
-  // Center card & deck
-  renderUnoCenter(state.currentCard, state.deckCount, state.drawStack);
-  
-  // Hand
-  renderUnoHand();
-  
-  // UNO button
-  const unoBtn = document.getElementById('unoBtn');
-  unoBtn.disabled = !unoMyTurn || unoHand.length > 2;
+socket.on("uno-state", (data) => {
+  console.log("UNO STATE:", data);
+  unoState = data;
+  showScreen("unoScreen");
+  renderUNO();
 });
 
-function renderUnoPlayers(players, currentId) {
-  document.getElementById('unoPlayerList').innerHTML = players.map(p => {
-    const isCurrent = p.id === currentId;
-    const isMe = p.id === socket.id;
-    
-    return `
-      <div class="uno-player ${isCurrent ? 'current' : ''} ${isMe ? 'is-me' : ''} ${p.disconnected ? 'disconnected' : ''}">
-        <div class="uno-player-name">
-          ${p.username}${isMe ? ' (You)' : ''}
-          ${p.calledUno ? ' 🔥' : ''}
-        </div>
-        <div class="uno-player-cards">🎴 ${p.handCount}</div>
-        ${isCurrent ? '<div class="turn-arrow">◀</div>' : ''}
-        ${p.handCount === 1 && !p.calledUno && !isMe ? 
-          `<button class="challenge-btn" onclick="challengeUno('${p.id}')">Challenge!</button>` : ''}
-      </div>
-    `;
-  }).join('');
-}
+socket.on("uno-error", (msg) => {
+  showToast(msg);
+});
 
-function renderUnoCenter(card, deckCount, drawStack) {
+socket.on("uno-called", (data) => {
+  showToast(`🔥 ${data.name} called UNO!`);
+});
+
+socket.on("uno-penalty", (data) => {
+  showToast(`⚠️ ${data.name}: ${data.reason}`);
+});
+
+function renderUNO() {
+  const data = unoState;
+  
   // Current card
-  const cardEl = document.getElementById('unoCurrentCard');
+  const cc = document.getElementById("unoCurrentCard");
+  const card = data.currentCard;
   if (card) {
     const color = card.activeColor || card.color;
-    cardEl.className = `uno-card ${color}`;
-    cardEl.innerHTML = getCardSymbol(card);
+    cc.className = `uno-card ${color}`;
+    cc.textContent = getUnoSymbol(card);
   }
   
-  // Deck
-  document.getElementById('unoDeckCount').textContent = deckCount;
-  
-  const deckEl = document.getElementById('unoDeck');
-  deckEl.className = unoMyTurn ? 'uno-deck can-draw' : 'uno-deck';
+  // Deck count
+  document.getElementById("unoDeckCount").textContent = data.deckCount || 0;
   
   // Draw stack
-  const stackEl = document.getElementById('drawStackInfo');
-  if (drawStack > 0) {
-    stackEl.textContent = `+${drawStack} cards stacked!`;
-    stackEl.style.display = 'block';
+  const stack = document.getElementById("drawStack");
+  if (data.drawStack > 0) {
+    stack.textContent = `+${data.drawStack} stacked!`;
+    stack.classList.add("active");
   } else {
-    stackEl.style.display = 'none';
+    stack.classList.remove("active");
   }
   
   // Turn indicator
-  const turnEl = document.getElementById('unoTurnIndicator');
-  turnEl.textContent = unoMyTurn ? '🎯 Your Turn!' : 'Waiting...';
-  turnEl.className = unoMyTurn ? 'turn-indicator my-turn' : 'turn-indicator';
-}
-
-function renderUnoHand() {
-  const handEl = document.getElementById('unoHandCards');
+  const turn = document.getElementById("unoTurn");
+  turn.textContent = data.isMyTurn ? "🎯 Your Turn!" : "Waiting...";
+  turn.className = data.isMyTurn ? "my-turn" : "";
   
-  handEl.innerHTML = unoHand.map((card, i) => {
-    const color = card.activeColor || card.color;
-    const canPlay = unoMyTurn && canPlayCard(card, unoCurrentCard);
-    
+  // Deck clickable
+  const deck = document.getElementById("unoDeck");
+  deck.className = data.isMyTurn ? "uno-deck can-draw" : "uno-deck";
+  
+  // Players
+  const plist = document.getElementById("unoPlayers");
+  plist.innerHTML = data.players.map(p => `
+    <div class="uno-player ${p.isCurrentTurn ? 'current' : ''}">
+      <div class="pname">${p.name}${p.calledUno ? ' 🔥' : ''}</div>
+      <div class="pcards">🎴 ${p.cardCount}</div>
+      ${p.cardCount === 1 && !p.calledUno ? 
+        `<button class="challenge-btn" onclick="challengeUno('${p.odumid}')">Challenge!</button>` : ''}
+    </div>
+  `).join("");
+  
+  // Hand
+  const hand = document.getElementById("unoHand");
+  if (!data.myHand || data.myHand.length === 0) {
+    hand.innerHTML = '<div style="padding:20px;color:#aa9988;">Loading...</div>';
+    return;
+  }
+  
+  hand.innerHTML = data.myHand.map((c, i) => {
+    const col = c.activeColor || c.color;
+    const canPlay = data.isMyTurn && canPlayCard(c, data.currentCard);
     return `
-      <div class="uno-card-small ${color} ${canPlay ? 'playable' : 'unplayable'}"
-           onclick="${canPlay ? `playUnoCard(${i})` : 'cantPlay()'}">
-        ${getCardSymbol(card)}
+      <div class="uno-card-small ${col} ${canPlay ? 'playable' : 'unplayable'}" 
+           onclick="${canPlay ? `playUno(${i})` : 'cantPlay()'}">
+        ${getUnoSymbol(c)}
       </div>
     `;
-  }).join('');
+  }).join("");
 }
 
-function getCardSymbol(card) {
-  if (!card) return '?';
-  switch (card.value) {
-    case 'wild': return '🌈';
-    case 'wild-draw4': return '+4';
-    case 'draw2': return '+2';
-    case 'skip': return '🚫';
-    case 'reverse': return '🔄';
+function getUnoSymbol(card) {
+  if (!card) return "?";
+  switch(card.value) {
+    case "wild": return "🌈";
+    case "draw4": return "+4";
+    case "draw2": return "+2";
+    case "skip": return "🚫";
+    case "reverse": return "🔄";
     default: return card.value;
   }
 }
 
-function canPlayCard(card, topCard) {
-  if (!card || !topCard) return false;
-  if (card.color === 'wild') return true;
-  const activeColor = topCard.activeColor || topCard.color;
-  if (card.color === activeColor) return true;
-  if (card.value === topCard.value) return true;
+function canPlayCard(card, top) {
+  if (!card || !top) return false;
+  if (card.color === "wild") return true;
+  const topColor = top.activeColor || top.color;
+  if (card.color === topColor) return true;
+  if (card.value === top.value) return true;
   return false;
 }
 
-function cantPlay() {
-  showModal('❌ Cannot Play', unoMyTurn ? 
-    'This card doesn\'t match. Draw a card or play a valid card.' :
-    'It\'s not your turn!');
-}
-
-async function playUnoCard(index) {
-  const card = unoHand[index];
+function playUno(index) {
+  const card = unoState.myHand[index];
   
-  if (card.color === 'wild') {
-    const color = await showModal('🌈 Choose Color', 'Pick a color:', {
-      colorPicker: true
-    });
-    
-    if (!color) return;
-    socket.emit('uno-play', { cardIndex: index, chosenColor: color });
+  if (card.color === "wild") {
+    const color = prompt("Choose color: red, yellow, green, blue");
+    if (["red","yellow","green","blue"].includes(color)) {
+      socket.emit("uno-play", { cardIndex: index, color: color });
+    }
   } else {
-    socket.emit('uno-play', { cardIndex: index });
+    socket.emit("uno-play", { cardIndex: index });
   }
 }
 
-function drawUnoCard() {
-  if (!unoMyTurn) {
-    showModal('⏳ Wait', 'It\'s not your turn!');
+function drawUno() {
+  if (!unoState.isMyTurn) {
+    showToast("Not your turn!");
     return;
   }
-  socket.emit('uno-draw');
+  socket.emit("uno-draw");
 }
 
 function callUno() {
-  socket.emit('uno-call');
+  socket.emit("uno-call");
 }
 
-function challengeUno(playerId) {
-  socket.emit('uno-challenge', playerId);
+function challengeUno(targetId) {
+  socket.emit("uno-challenge", targetId);
 }
 
-// UNO events
-socket.on('uno-error', (msg) => {
-  showModal('❌ Error', msg);
-});
-
-socket.on('uno-can-play-drawn', () => {
-  showModal('✅ Playable!', 'You drew a playable card! Click it to play.');
-});
-
-socket.on('uno-called', (data) => {
-  showOverlay(`🔥 ${data.username} called UNO!`);
-});
-
-socket.on('uno-penalty', (data) => {
-  showOverlay(`⚠️ ${data.username}: ${data.reason}`);
-});
+function cantPlay() {
+  if (!unoState.isMyTurn) {
+    showToast("Not your turn!");
+  } else {
+    showToast("Can't play that card - draw instead!");
+  }
+}
