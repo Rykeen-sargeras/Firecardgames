@@ -1,32 +1,115 @@
 // ===========================================
 // CARDS AGAINST THE LCU - Main Client
+// v4.0 - Enhanced UI & Engine
 // ===========================================
 
 const socket = io();
 
+// State
 let myName = "";
 let roomCode = "";
 let gameState = {};
 let previewCardData = null;
 let longPressTimer = null;
+let isSubmitting = false;
+let lastActionTime = 0;
+
+// Session persistence
+const SESSION_KEY = 'cah_session';
+const DEBOUNCE_MS = 500;
+
+// ===========================================
+// SESSION PERSISTENCE
+// ===========================================
+function saveSession() {
+  const session = {
+    name: myName,
+    roomCode: roomCode,
+    sessionId: getSessionId(),
+    timestamp: Date.now()
+  };
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function loadSession() {
+  try {
+    const saved = localStorage.getItem(SESSION_KEY);
+    if (saved) {
+      const session = JSON.parse(saved);
+      if (Date.now() - session.timestamp < 3600000) {
+        return session;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+function getSessionId() {
+  let sid = localStorage.getItem('cah_sid');
+  if (!sid) {
+    sid = Math.random().toString(36).substring(2, 10);
+    localStorage.setItem('cah_sid', sid);
+  }
+  return sid;
+}
+
+// ===========================================
+// DEBOUNCE
+// ===========================================
+function canPerformAction() {
+  const now = Date.now();
+  if (now - lastActionTime < DEBOUNCE_MS) return false;
+  lastActionTime = now;
+  return true;
+}
 
 // ===========================================
 // CONNECTION
 // ===========================================
 socket.on("connect", () => {
   console.log("Connected:", socket.id);
-  document.getElementById("status").textContent = "🟢 Connected";
-  document.getElementById("status").className = "connected";
+  updateStatus(true);
+  
+  socket.emit("set-session", getSessionId());
+  
+  const session = loadSession();
+  if (session && session.roomCode && session.name) {
+    myName = session.name;
+    roomCode = session.roomCode;
+    document.getElementById("nameInput").value = myName;
+    
+    socket.emit("join-room", { 
+      code: roomCode, 
+      name: myName,
+      sessionId: session.sessionId
+    }, (res) => {
+      if (res.ok) {
+        document.getElementById("lobbyCode").textContent = roomCode;
+        showToast("Reconnected!");
+      } else {
+        clearSession();
+      }
+    });
+  }
 });
 
 socket.on("disconnect", () => {
   console.log("Disconnected");
-  document.getElementById("status").textContent = "🔴 Disconnected";
-  document.getElementById("status").className = "disconnected";
+  updateStatus(false);
 });
 
+function updateStatus(connected) {
+  const el = document.getElementById("status");
+  el.textContent = connected ? "🟢 Connected" : "🔴 Reconnecting...";
+  el.className = connected ? "connected" : "disconnected";
+}
+
 // ===========================================
-// CUSTOM MODAL SYSTEM (replaces alert/confirm/prompt)
+// CUSTOM MODAL SYSTEM
 // ===========================================
 function showModal(options) {
   return new Promise((resolve) => {
@@ -40,7 +123,6 @@ function showModal(options) {
     title.textContent = options.title || "Alert";
     message.textContent = options.message || "";
     
-    // Input field
     if (options.input) {
       input.style.display = "block";
       input.value = options.inputValue || "";
@@ -50,13 +132,7 @@ function showModal(options) {
       input.style.display = "none";
     }
     
-    // Cancel button
-    if (options.showCancel) {
-      cancelBtn.style.display = "block";
-    } else {
-      cancelBtn.style.display = "none";
-    }
-    
+    cancelBtn.style.display = options.showCancel ? "block" : "none";
     confirmBtn.textContent = options.confirmText || "OK";
     cancelBtn.textContent = options.cancelText || "Cancel";
     
@@ -69,43 +145,28 @@ function showModal(options) {
       input.onkeydown = null;
     };
     
-    confirmBtn.onclick = () => {
-      cleanup();
-      resolve(options.input ? input.value : true);
-    };
-    
-    cancelBtn.onclick = () => {
-      cleanup();
-      resolve(null);
-    };
+    confirmBtn.onclick = () => { cleanup(); resolve(options.input ? input.value : true); };
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
     
     if (options.input) {
       input.onkeydown = (e) => {
-        if (e.key === "Enter") {
-          cleanup();
-          resolve(input.value);
-        } else if (e.key === "Escape") {
-          cleanup();
-          resolve(null);
-        }
+        if (e.key === "Enter") { cleanup(); resolve(input.value); }
+        if (e.key === "Escape") { cleanup(); resolve(null); }
       };
     }
   });
 }
 
-// Helper functions to replace native dialogs
 async function customAlert(message, title = "Notice") {
   await showModal({ title, message });
 }
 
 async function customConfirm(message, title = "Confirm") {
-  const result = await showModal({ title, message, showCancel: true, confirmText: "Yes", cancelText: "No" });
-  return result === true;
+  return await showModal({ title, message, showCancel: true, confirmText: "Yes", cancelText: "No" }) === true;
 }
 
 async function customPrompt(message, title = "Input", placeholder = "") {
-  const result = await showModal({ title, message, input: true, placeholder, showCancel: true });
-  return result;
+  return await showModal({ title, message, input: true, placeholder, showCancel: true });
 }
 
 // ===========================================
@@ -117,6 +178,7 @@ function showScreen(id) {
 }
 
 function goHome() {
+  clearSession();
   showScreen("homeScreen");
 }
 
@@ -124,6 +186,8 @@ function goHome() {
 // CREATE / JOIN
 // ===========================================
 async function createGame() {
+  if (!canPerformAction()) return;
+  
   const name = document.getElementById("nameInput").value.trim();
   if (!name) {
     await customAlert("Please enter your name first!", "Oops");
@@ -133,11 +197,18 @@ async function createGame() {
   
   socket.emit("create-room", {}, (res) => {
     roomCode = res.code;
-    socket.emit("join-room", { code: roomCode, name: myName, create: true }, handleJoin);
+    socket.emit("join-room", { 
+      code: roomCode, 
+      name: myName, 
+      create: true,
+      sessionId: getSessionId()
+    }, handleJoin);
   });
 }
 
 async function joinPrompt() {
+  if (!canPerformAction()) return;
+  
   const name = document.getElementById("nameInput").value.trim();
   if (!name) {
     await customAlert("Please enter your name first!", "Oops");
@@ -148,20 +219,22 @@ async function joinPrompt() {
   const code = await customPrompt("Enter the room code:", "Join Game", "ABC123");
   if (code && code.trim()) {
     roomCode = code.trim().toUpperCase();
-    socket.emit("join-room", { code: roomCode, name: myName }, handleJoin);
+    socket.emit("join-room", { 
+      code: roomCode, 
+      name: myName,
+      sessionId: getSessionId()
+    }, handleJoin);
   }
 }
 
 async function handleJoin(res) {
   if (res.ok) {
     document.getElementById("lobbyCode").textContent = roomCode;
+    saveSession();
     showScreen("lobbyScreen");
     
-    if (res.pending) {
-      showToast("You'll join next round!");
-    } else if (res.reconnected) {
-      showToast("Reconnected!");
-    }
+    if (res.pending) showToast("You'll join next round!");
+    else if (res.reconnected) showToast("Reconnected!");
   } else {
     await customAlert(res.error || "Failed to join", "Error");
   }
@@ -175,6 +248,8 @@ socket.on("lobby", (data) => {
   
   showScreen("lobbyScreen");
   document.getElementById("lobbyCode").textContent = data.roomCode;
+  roomCode = data.roomCode;
+  saveSession();
   
   const list = document.getElementById("playerList");
   
@@ -187,11 +262,11 @@ socket.on("lobby", (data) => {
       if (p.ready) classes += " ready";
       if (p.disconnected) classes += " dc";
       
-      let status = p.disconnected ? `⏱️ ${p.reconnectTime}s` : (p.ready ? "✅ Ready" : "⏳");
+      let status = p.disconnected ? `⏱️ ${p.reconnectTime}s` : (p.ready ? "✅" : "⏳");
       
       return `<div class="${classes}">
-        <span class="player-name">${escapeHtml(p.name)}${p.odumid === socket.id ? " (You)" : ""}</span>
-        <span class="player-status">${status}</span>
+        <span style="font-weight:600">${escapeHtml(p.name)}${p.odumid === socket.id ? " (You)" : ""}</span>
+        <span style="color:var(--text-dim)">${status}</span>
       </div>`;
     }).join("");
   }
@@ -210,6 +285,7 @@ socket.on("countdown-cancelled", () => {
 });
 
 function toggleReady() {
+  if (!canPerformAction()) return;
   socket.emit("ready");
 }
 
@@ -220,6 +296,7 @@ socket.on("player-dc", (data) => showToast(`${data.name} disconnected`));
 socket.on("player-reconnected", (data) => showToast(`${data.name} reconnected!`));
 socket.on("player-left", (data) => showToast(`${data.name} left`));
 socket.on("player-joined-game", (data) => showToast(`${data.name} joined!`));
+socket.on("player-kicked", (data) => showToast(`${data.name} was kicked`));
 
 // ===========================================
 // GAME
@@ -227,17 +304,20 @@ socket.on("player-joined-game", (data) => showToast(`${data.name} joined!`));
 socket.on("game-start", () => {
   document.getElementById("countdownOverlay").classList.remove("active");
   showScreen("gameScreen");
+  saveSession();
 });
 
 socket.on("game-state", (data) => {
   gameState = data;
   showScreen("gameScreen");
   renderGame();
+  isSubmitting = false;
 });
 
 socket.on("game-reset", () => {
   showScreen("lobbyScreen");
   showToast("Game reset");
+  document.getElementById("winnerOverlay").classList.remove("active", "game-over");
 });
 
 socket.on("game-ended", (data) => {
@@ -245,20 +325,20 @@ socket.on("game-ended", (data) => {
   showToast(data.reason || "Game ended");
 });
 
+socket.on("round-timer", (seconds) => {
+  const timerEl = document.getElementById("timerDisplay");
+  const timerContainer = document.getElementById("roundTimer");
+  timerEl.textContent = seconds + "s";
+  timerContainer.classList.toggle("urgent", seconds <= 10);
+});
+
 socket.on("round-winner", (data) => {
-  showWinner(`🎉 ${data.name} wins! (${data.score} pts)`);
+  showWinner(`🎉 ${data.name} wins!`, false);
 });
 
 socket.on("game-winner", (data) => {
-  showWinner(`🏆 ${data.name} WINS THE GAME! 🏆`);
-  if (typeof confetti === "function") {
-    confetti({ 
-      particleCount: 200, 
-      spread: 120, 
-      colors: ['#e63022', '#ff5722', '#ff8a50', '#ffc107'],
-      origin: { y: 0.6 }
-    });
-  }
+  showWinner(`🏆 ${data.name} WINS! 🏆`, true);
+  fireConfetti();
 });
 
 // ===========================================
@@ -271,13 +351,23 @@ function renderGame() {
   document.getElementById("czarName").textContent = data.czarName || "...";
   document.getElementById("roundNum").textContent = data.roundNumber || 1;
   
-  // Scoreboard
+  if (data.roundTimeLeft > 0) {
+    document.getElementById("timerDisplay").textContent = data.roundTimeLeft + "s";
+    document.getElementById("roundTimer").classList.toggle("urgent", data.roundTimeLeft <= 10);
+  }
+  
+  const submitted = data.submissionCount || 0;
+  const expected = data.expectedCount || 1;
+  const pct = Math.round((submitted / expected) * 100);
+  document.getElementById("progressText").textContent = `${submitted}/${expected} submitted`;
+  document.getElementById("progressFill").style.width = pct + "%";
+  
   document.getElementById("scoreboard").innerHTML = data.players.map(p => {
     let classes = "score-row";
     if (p.isCzar) classes += " czar";
     return `<div class="${classes}">
       <span>${escapeHtml(p.name)}${p.isCzar ? " 👑" : ""}</span>
-      <span>${p.score}</span>
+      <span style="font-weight:600">${p.score}</span>
     </div>`;
   }).join("");
   
@@ -289,21 +379,24 @@ function renderSubmissions(data) {
   const grid = document.getElementById("submissionGrid");
   const slots = [];
   
-  data.submissions.forEach(s => {
+  data.submissions.forEach((s) => {
     const canPick = data.isCzar && data.allSubmitted;
-    slots.push(`<div class="white-card ${canPick ? 'clickable' : ''}" 
-      ${canPick ? `onclick="pickWinner('${s.odumid}')"` : ''}
-      onmouseenter="hoverCard(this)"
-      onmouseleave="unhoverCard(this)"
-      ontouchstart="touchStartCard(event, '${escapeAttr(s.card)}', ${canPick}, '${s.odumid}')"
-      ontouchend="touchEndCard(event)">
-      ${escapeHtml(s.card)}
-    </div>`);
+    slots.push(`
+      <div class="card-wrapper">
+        <div class="white-card flipped ${canPick ? 'pickable' : ''}"
+          data-odumid="${s.odumid}"
+          onclick="${canPick ? `pickWinner('${s.odumid}')` : ''}"
+          ontouchstart="touchStartSubmission(event, '${escapeAttr(s.card)}', ${canPick}, '${s.odumid}')"
+          ontouchend="touchEndCard(event)">
+          <div class="card-face card-back"></div>
+          <div class="card-face card-front">${escapeHtml(s.card)}</div>
+        </div>
+      </div>
+    `);
   });
   
-  // Fill to 10 slots (5x2)
   while (slots.length < 10) {
-    slots.push('<div class="white-card empty"></div>');
+    slots.push('<div class="card-wrapper empty"><div class="white-card"><div class="card-face card-front" style="background:rgba(255,255,255,0.03);border:2px dashed var(--ash)"></div></div></div>');
   }
   
   grid.innerHTML = slots.join("");
@@ -332,78 +425,79 @@ function renderHand(data) {
     return;
   }
   
-  hand.innerHTML = data.myHand.map((cardData, i) => {
+  hand.innerHTML = data.myHand.map((cardData) => {
     const isRevealed = cardData.revealed;
     const card = cardData.card;
     
-    if (!isRevealed) {
-      // Blank card - tap to reveal
-      return `<div class="white-card blank-card clickable" 
-        onclick="revealCard(${cardData.index})"
-        ontouchstart="touchStartBlank(event, ${cardData.index})"
-        ontouchend="touchEndCard(event)">
-        ?
-      </div>`;
-    } else {
-      // Revealed card - can play
-      return `<div class="white-card clickable" 
-        onclick="playCard(${cardData.index}, '${escapeAttr(card)}')"
-        onmouseenter="hoverCard(this)"
-        onmouseleave="unhoverCard(this)"
-        ontouchstart="touchStartCard(event, '${escapeAttr(card)}', true, null, ${cardData.index})"
-        ontouchend="touchEndCard(event)">
-        ${escapeHtml(card)}
-      </div>`;
-    }
+    return `
+      <div class="card-wrapper">
+        <div class="white-card ${isRevealed ? 'flipped playable' : 'blank'}"
+          data-index="${cardData.index}"
+          onclick="handleCardClick(${cardData.index}, '${escapeAttr(card)}', ${isRevealed})"
+          ontouchstart="touchStartHand(event, ${cardData.index}, '${escapeAttr(card)}', ${isRevealed})"
+          ontouchend="touchEndCard(event)">
+          <div class="card-face card-back">?</div>
+          <div class="card-face card-front">${escapeHtml(card)}</div>
+        </div>
+      </div>
+    `;
   }).join("");
 }
 
 // ===========================================
 // CARD INTERACTIONS
 // ===========================================
-
-// Reveal a blank card
-function revealCard(index) {
-  socket.emit("reveal-card", index);
+function handleCardClick(index, card, revealed) {
+  if (!canPerformAction()) return;
+  
+  if (!revealed) {
+    const cardEl = document.querySelector(`[data-index="${index}"]`);
+    if (cardEl) {
+      cardEl.classList.add("flipped");
+      cardEl.classList.remove("blank");
+      cardEl.classList.add("playable");
+    }
+    socket.emit("reveal-card", index);
+  } else {
+    playCard(index, card);
+  }
 }
 
-// Play a card
-async function playCard(index, card) {
-  closePreview();
+function playCard(index, card) {
+  if (isSubmitting || !canPerformAction()) return;
+  isSubmitting = true;
+  
+  document.getElementById("handCards").innerHTML = '<div class="status-msg">✅ Submitting...</div>';
   socket.emit("submit", { card: card });
 }
 
-// Pick winner (czar only)
 function pickWinner(odumid) {
+  if (!canPerformAction()) return;
   closePreview();
   socket.emit("pick", odumid);
 }
 
-// Desktop hover zoom
-function hoverCard(el) {
-  // Optional: could add tooltip or scale here
-}
-
-function unhoverCard(el) {
-  // Reset hover state
-}
-
-// Touch/long-press for mobile preview
-function touchStartCard(event, cardText, canAct, odumid, cardIndex) {
+function touchStartHand(event, index, card, revealed) {
   event.preventDefault();
+  previewCardData = { index, card, revealed, type: 'hand' };
   
-  previewCardData = { cardText, canAct, odumid, cardIndex };
+  if (!revealed) {
+    handleCardClick(index, card, revealed);
+    return;
+  }
   
-  // Long press (500ms) to show preview
   longPressTimer = setTimeout(() => {
-    showCardPreview(cardText, canAct, odumid, cardIndex);
-  }, 500);
+    showCardPreview(card, true, null, index);
+  }, 400);
 }
 
-function touchStartBlank(event, index) {
+function touchStartSubmission(event, card, canPick, odumid) {
   event.preventDefault();
-  // Immediate reveal on tap
-  revealCard(index);
+  previewCardData = { card, canPick, odumid, type: 'submission' };
+  
+  longPressTimer = setTimeout(() => {
+    showCardPreview(card, canPick, odumid, null);
+  }, 400);
 }
 
 function touchEndCard(event) {
@@ -412,22 +506,19 @@ function touchEndCard(event) {
     longPressTimer = null;
   }
   
-  // Quick tap - perform action
   if (previewCardData && !document.getElementById("cardPreview").classList.contains("active")) {
-    const { canAct, odumid, cardIndex, cardText } = previewCardData;
-    if (canAct) {
-      if (odumid) {
-        pickWinner(odumid);
-      } else if (cardIndex !== undefined && cardIndex !== null) {
-        playCard(cardIndex, cardText);
-      }
+    const { type, index, card, revealed, canPick, odumid } = previewCardData;
+    
+    if (type === 'hand' && revealed) {
+      playCard(index, card);
+    } else if (type === 'submission' && canPick) {
+      pickWinner(odumid);
     }
   }
   
   previewCardData = null;
 }
 
-// Card preview modal
 function showCardPreview(cardText, canAct, odumid, cardIndex) {
   const preview = document.getElementById("cardPreview");
   const content = document.getElementById("previewCardContent");
@@ -438,11 +529,8 @@ function showCardPreview(cardText, canAct, odumid, cardIndex) {
   if (canAct) {
     playBtn.style.display = "block";
     playBtn.onclick = () => {
-      if (odumid) {
-        pickWinner(odumid);
-      } else if (cardIndex !== undefined) {
-        playCard(cardIndex, cardText);
-      }
+      if (odumid) pickWinner(odumid);
+      else if (cardIndex !== undefined) playCard(cardIndex, cardText);
     };
   } else {
     playBtn.style.display = "none";
@@ -456,23 +544,48 @@ function closePreview() {
   previewCardData = null;
 }
 
-// Close preview on background click
 document.getElementById("cardPreview").addEventListener("click", (e) => {
-  if (e.target.id === "cardPreview") {
-    closePreview();
-  }
+  if (e.target.id === "cardPreview") closePreview();
 });
+
+// ===========================================
+// REMATCH
+// ===========================================
+function requestRematch() {
+  if (!canPerformAction()) return;
+  socket.emit("rematch");
+  document.getElementById("winnerOverlay").classList.remove("active", "game-over");
+}
+
+// ===========================================
+// CONFETTI (Fire Colors)
+// ===========================================
+function fireConfetti() {
+  if (typeof confetti !== "function") return;
+  
+  const fireColors = ['#e63022', '#ff5722', '#ff8a50', '#ffc107', '#ff6b00'];
+  
+  confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: fireColors });
+  
+  setTimeout(() => {
+    confetti({ particleCount: 50, angle: 60, spread: 55, origin: { x: 0 }, colors: fireColors });
+    confetti({ particleCount: 50, angle: 120, spread: 55, origin: { x: 1 }, colors: fireColors });
+  }, 250);
+  
+  setTimeout(() => {
+    confetti({ particleCount: 150, spread: 100, origin: { y: 0.7 }, colors: fireColors });
+  }, 500);
+}
 
 // ===========================================
 // CHAT
 // ===========================================
 function toggleChat() {
-  document.getElementById("chatContainer").classList.toggle("open");
+  const container = document.getElementById("chatContainer");
+  container.classList.toggle("open");
   
-  // Scroll to bottom when opening
-  if (document.getElementById("chatContainer").classList.contains("open")) {
-    const messages = document.getElementById("chatMessages");
-    messages.scrollTop = messages.scrollHeight;
+  if (container.classList.contains("open")) {
+    document.getElementById("chatMessages").scrollTop = document.getElementById("chatMessages").scrollHeight;
   }
 }
 
@@ -490,15 +603,11 @@ socket.on("chat", (data) => {
   div.className = "chat-msg";
   div.innerHTML = `<b>${escapeHtml(data.name)}:</b> ${escapeHtml(data.msg)}`;
   box.appendChild(div);
-  
-  // Auto-scroll to bottom
   box.scrollTop = box.scrollHeight;
   
-  // Flash header if closed
   if (!document.getElementById("chatContainer").classList.contains("open")) {
-    const header = document.querySelector(".chat-header");
-    header.style.boxShadow = "0 0 20px #ff5722";
-    setTimeout(() => { header.style.boxShadow = ""; }, 500);
+    document.querySelector(".chat-header").style.boxShadow = "0 0 30px var(--fire-orange)";
+    setTimeout(() => { document.querySelector(".chat-header").style.boxShadow = ""; }, 600);
   }
 });
 
@@ -514,35 +623,32 @@ document.getElementById("chatInput").addEventListener("keypress", (e) => {
 // ADMIN
 // ===========================================
 async function openAdmin() {
-  const pw = await customPrompt("Enter admin password:", "Admin Login", "");
-  if (pw) socket.emit("admin", { pw: pw, action: "login" });
+  const pw = await customPrompt("Admin password:", "Admin");
+  if (pw) socket.emit("admin", { pw, action: "login" });
 }
 
 socket.on("admin-ok", async () => {
   const action = await showModal({
-    title: "🛠️ Admin Panel",
-    message: "Select an action:",
+    title: "🛠️ Admin",
+    message: "Choose action:",
     showCancel: true,
     confirmText: "Reset Game",
     cancelText: "Clear Chat"
   });
   
   if (action === true) {
-    const pw = await customPrompt("Confirm password to reset:", "Reset Game");
+    const pw = await customPrompt("Confirm password:", "Reset");
     if (pw) socket.emit("admin", { pw, action: "reset" });
-  } else if (action === null) {
-    // Cancel was clicked - check if they want to clear chat
-    const confirm = await customConfirm("Clear all chat messages?", "Clear Chat");
+  } else {
+    const confirm = await customConfirm("Clear chat?", "Clear");
     if (confirm) {
-      const pw = await customPrompt("Confirm password:", "Clear Chat");
+      const pw = await customPrompt("Confirm password:", "Clear");
       if (pw) socket.emit("admin", { pw, action: "wipe-chat" });
     }
   }
 });
 
-socket.on("admin-fail", () => {
-  customAlert("Wrong password!", "Access Denied");
-});
+socket.on("admin-fail", () => customAlert("Wrong password!", "Denied"));
 
 // ===========================================
 // TOAST & OVERLAYS
@@ -554,11 +660,16 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove("active"), 3000);
 }
 
-function showWinner(msg) {
+function showWinner(msg, isGameOver) {
   const overlay = document.getElementById("winnerOverlay");
   document.getElementById("winnerText").textContent = msg;
+  
+  overlay.classList.toggle("game-over", isGameOver);
   overlay.classList.add("active");
-  setTimeout(() => overlay.classList.remove("active"), 4000);
+  
+  if (!isGameOver) {
+    setTimeout(() => overlay.classList.remove("active"), 3500);
+  }
 }
 
 // ===========================================
@@ -582,15 +693,26 @@ document.getElementById("nameInput").addEventListener("keypress", (e) => {
 });
 
 // ===========================================
+// PRELOAD IMAGES
+// ===========================================
+['whitecard.png', 'blkcard.png', 'cardsback.png'].forEach(src => {
+  const img = new Image();
+  img.src = src;
+});
+
+// ===========================================
+// PREVENT DOUBLE TAP ZOOM
+// ===========================================
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 300) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+
+// ===========================================
 // INIT
 // ===========================================
 showScreen("homeScreen");
-
-// Prevent zoom on double-tap (iOS)
-document.addEventListener('touchend', (e) => {
-  const now = Date.now();
-  if (now - (window.lastTouchEnd || 0) < 300) {
-    e.preventDefault();
-  }
-  window.lastTouchEnd = now;
-}, { passive: false });
+const savedSession = loadSession();
+if (savedSession?.name) document.getElementById("nameInput").value = savedSession.name;
