@@ -18,7 +18,8 @@ const ADMIN_PASS = process.env.ADMIN_PASS || "Firesluts21";
 const WIN_POINTS = 10;
 const COUNTDOWN_SECONDS = 15;
 const RECONNECT_SECONDS = 60;
-const ROUND_TIMER_SECONDS = 45; // Time to submit cards
+const SUBMIT_TIMER_SECONDS = 180; // 3 minutes to submit cards
+const JUDGE_TIMER_SECONDS = 120;  // 2 minutes for judging
 const HAND_SIZE = 10;
 
 // ===========================================
@@ -78,7 +79,6 @@ try {
 // UTILITIES
 // ===========================================
 const filter = new Filter();
-filter.removeWords("hell", "damn", "god");
 
 function shuffle(arr) {
   const a = [...arr];
@@ -90,7 +90,6 @@ function shuffle(arr) {
 }
 
 function generateCode() {
-  // No 0 or O to avoid confusion
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ123456789';
   let code = '';
   for (let i = 0; i < 6; i++) {
@@ -100,35 +99,34 @@ function generateCode() {
 }
 
 // ===========================================
-// ROOMS
+// ROOMS & SESSIONS
 // ===========================================
 const rooms = {};
-
-// Store player sessions for reconnection
-const playerSessions = {}; // odumid -> { name, roomCode, odumid }
+const playerSessions = {};
 
 function createRoom(code) {
   rooms[code] = {
     code: code,
     players: {},
+    pendingPlayers: {},
     started: false,
-    countdownTimer: null,
-    countdownValue: 0,
-    whiteDeck: shuffle([...whiteCardsOriginal]),
+    whiteDeck: [],
     whiteDiscard: [],
-    blackDeck: shuffle([...blackCardsOriginal]),
+    blackDeck: [],
     blackDiscard: [],
-    currentBlack: "",
+    usedBlackCards: [],
+    currentBlack: null,
     submissions: [],
     czarIndex: 0,
     roundNumber: 0,
-    pendingPlayers: {},
     roundTimer: null,
     roundTimeLeft: 0,
-    lastWinner: null,
-    winningCards: [] // History of winning cards
+    timerPhase: 'submit',
+    countdownTimer: null,
+    countdownValue: 0,
+    winningCards: [],
+    lastWinner: null
   };
-  console.log(`Room ${code} created`);
   return rooms[code];
 }
 
@@ -136,37 +134,52 @@ function getRoom(code) {
   return rooms[code];
 }
 
-// ===========================================
-// CARD DRAWING
-// ===========================================
-function drawWhiteCard(room, excludeCards = []) {
+function drawWhiteCard(room, exclude = []) {
   if (room.whiteDeck.length === 0) {
-    if (room.whiteDiscard.length === 0) {
-      room.whiteDeck = shuffle([...whiteCardsOriginal]);
-    } else {
-      room.whiteDeck = shuffle([...room.whiteDiscard]);
-      room.whiteDiscard = [];
+    if (room.whiteDiscard.length === 0) return null;
+    room.whiteDeck = shuffle(room.whiteDiscard);
+    room.whiteDiscard = [];
+  }
+  
+  for (let i = 0; i < room.whiteDeck.length; i++) {
+    const card = room.whiteDeck[i];
+    if (!exclude.includes(card)) {
+      room.whiteDeck.splice(i, 1);
+      return card;
     }
   }
   
-  for (let i = room.whiteDeck.length - 1; i >= 0; i--) {
-    if (!excludeCards.includes(room.whiteDeck[i])) {
-      return room.whiteDeck.splice(i, 1)[0];
-    }
-  }
   return room.whiteDeck.pop();
 }
 
+// FIX #5: Draw black card without duplicates
 function drawBlackCard(room) {
+  if (room.usedBlackCards.length >= blackCardsOriginal.length) {
+    room.usedBlackCards = [];
+  }
+  
   if (room.blackDeck.length === 0) {
     if (room.blackDiscard.length === 0) {
-      room.blackDeck = shuffle([...blackCardsOriginal]);
+      const available = blackCardsOriginal.filter(c => !room.usedBlackCards.includes(c));
+      room.blackDeck = shuffle(available.length > 0 ? available : blackCardsOriginal);
     } else {
-      room.blackDeck = shuffle([...room.blackDiscard]);
+      room.blackDeck = shuffle(room.blackDiscard);
       room.blackDiscard = [];
     }
   }
-  return room.blackDeck.pop();
+  
+  for (let i = 0; i < room.blackDeck.length; i++) {
+    const card = room.blackDeck[i];
+    if (!room.usedBlackCards.includes(card)) {
+      room.blackDeck.splice(i, 1);
+      room.usedBlackCards.push(card);
+      return card;
+    }
+  }
+  
+  const card = room.blackDeck.pop();
+  if (card) room.usedBlackCards.push(card);
+  return card;
 }
 
 // ===========================================
@@ -176,87 +189,75 @@ function broadcastLobby(code) {
   const room = getRoom(code);
   if (!room) return;
   
-  const playerList = [];
-  for (const [id, p] of Object.entries(room.players)) {
-    if (!p.name) continue;
-    playerList.push({
-      odumid: id,
-      name: p.name,
-      ready: p.ready === true,
-      disconnected: p.disconnected === true,
-      reconnectTime: p.reconnectTime || 0
-    });
-  }
+  const players = Object.entries(room.players).map(([id, p]) => ({
+    name: p.name,
+    ready: p.ready,
+    disconnected: p.disconnected,
+    reconnectTime: p.reconnectTime || 0,
+    odumid: id
+  })).filter(p => p.name);
   
-  const activePlayers = playerList.filter(p => !p.disconnected);
-  const readyPlayers = activePlayers.filter(p => p.ready);
-  const notReadyPlayers = activePlayers.filter(p => !p.ready);
-  
-  let waitingFor = "";
-  if (activePlayers.length < 3) {
-    const need = 3 - activePlayers.length;
-    waitingFor = `Need ${need} more player${need > 1 ? 's' : ''} (min 3)`;
-  } else if (notReadyPlayers.length > 0) {
-    waitingFor = `Waiting for: ${notReadyPlayers.map(p => p.name).join(", ")}`;
-  } else if (room.countdownValue > 0) {
-    waitingFor = `Starting in ${room.countdownValue}s...`;
-  } else {
-    waitingFor = "All ready!";
-  }
+  const readyCount = players.filter(p => p.ready && !p.disconnected).length;
+  const activeCount = players.filter(p => !p.disconnected).length;
+  const waitingFor = activeCount >= 3 ? 
+    (activeCount - readyCount > 0 ? `Waiting for ${activeCount - readyCount} player(s)...` : "All ready!") :
+    `Need ${3 - activeCount} more player(s)`;
   
   io.to(code).emit("lobby", {
+    players: players,
     roomCode: code,
-    players: playerList,
-    activeCount: activePlayers.length,
-    readyCount: readyPlayers.length,
-    countdown: room.countdownValue,
-    waitingFor: waitingFor,
-    started: room.started
+    started: room.started,
+    waitingFor: waitingFor
   });
 }
 
-// ===========================================
-// COUNTDOWN
-// ===========================================
 function checkAndStartCountdown(code) {
   const room = getRoom(code);
   if (!room || room.started) return;
   
-  const players = Object.values(room.players).filter(p => !p.disconnected && p.name);
-  const allReady = players.length >= 3 && players.every(p => p.ready);
+  const active = Object.values(room.players).filter(p => p.name && !p.disconnected);
+  const allReady = active.length >= 3 && active.every(p => p.ready);
   
   if (allReady && !room.countdownTimer) {
     room.countdownValue = COUNTDOWN_SECONDS;
+    io.to(code).emit("countdown", room.countdownValue);
+    
     room.countdownTimer = setInterval(() => {
       room.countdownValue--;
-      io.to(code).emit("countdown", room.countdownValue);
-      broadcastLobby(code);
       
       if (room.countdownValue <= 0) {
         clearInterval(room.countdownTimer);
         room.countdownTimer = null;
         startGame(code);
+      } else {
+        io.to(code).emit("countdown", room.countdownValue);
       }
     }, 1000);
-    broadcastLobby(code);
   } else if (!allReady && room.countdownTimer) {
     clearInterval(room.countdownTimer);
     room.countdownTimer = null;
     room.countdownValue = 0;
     io.to(code).emit("countdown-cancelled");
-    broadcastLobby(code);
   }
 }
 
 // ===========================================
-// RECONNECTION (Improved)
+// DISCONNECTION & RECONNECTION
 // ===========================================
-function startReconnectTimer(code, odumid) {
+function handleDisconnect(socket) {
+  const code = socket.roomCode;
   const room = getRoom(code);
   if (!room) return;
   
-  const player = room.players[odumid];
-  if (!player) return;
+  if (room.pendingPlayers && room.pendingPlayers[socket.id]) {
+    delete room.pendingPlayers[socket.id];
+    return;
+  }
+  
+  const player = room.players[socket.id];
+  if (!player || !player.name) return;
+  
+  const odumid = socket.id;
   
   player.disconnected = true;
   player.reconnectTime = RECONNECT_SECONDS;
@@ -280,7 +281,6 @@ function startReconnectTimer(code, odumid) {
     if (player.reconnectTime <= 0 || !player.disconnected) {
       clearInterval(timer);
       if (player.disconnected) {
-        // Clean up session
         for (const [sid, sess] of Object.entries(playerSessions)) {
           if (sess.odumid === odumid) delete playerSessions[sid];
         }
@@ -304,31 +304,35 @@ function startReconnectTimer(code, odumid) {
   broadcastLobby(code);
 }
 
+// FIX #6: Improved reconnection logic
 function tryReconnect(socket, code, name, sessionId) {
   const room = getRoom(code);
   if (!room) return false;
   
-  // Check by session ID first (better reconnection)
   if (sessionId && playerSessions[sessionId]) {
     const sess = playerSessions[sessionId];
     if (sess.roomCode === code) {
-      const player = room.players[sess.odumid];
-      if (player && player.disconnected) {
-        return doReconnect(socket, room, sess.odumid, player);
+      for (const [odumid, player] of Object.entries(room.players)) {
+        if (player.name && player.name.toLowerCase() === sess.name.toLowerCase()) {
+          if (player.disconnected) {
+            return doReconnect(socket, room, odumid, player, sessionId);
+          } else {
+            return doReconnect(socket, room, odumid, player, sessionId);
+          }
+        }
       }
     }
   }
   
-  // Fallback to name matching
   for (const [odumid, player] of Object.entries(room.players)) {
     if (player.name && player.name.toLowerCase() === name.toLowerCase() && player.disconnected) {
-      return doReconnect(socket, room, odumid, player);
+      return doReconnect(socket, room, odumid, player, sessionId);
     }
   }
   return false;
 }
 
-function doReconnect(socket, room, oldId, player) {
+function doReconnect(socket, room, oldId, player, sessionId) {
   if (player.reconnectTimer) clearInterval(player.reconnectTimer);
   
   player.disconnected = false;
@@ -340,9 +344,8 @@ function doReconnect(socket, room, oldId, player) {
   socket.join(room.code);
   socket.roomCode = room.code;
   socket.playerName = player.name;
+  socket.sessionId = sessionId || socket.sessionId || generateCode();
   
-  // Update session
-  socket.sessionId = socket.sessionId || generateCode();
   playerSessions[socket.sessionId] = {
     name: player.name,
     roomCode: room.code,
@@ -350,8 +353,9 @@ function doReconnect(socket, room, oldId, player) {
   };
   
   io.to(room.code).emit("player-reconnected", { name: player.name });
-  broadcastLobby(room.code);
+  
   if (room.started) sendGameState(room.code);
+  else broadcastLobby(room.code);
   
   return true;
 }
@@ -359,40 +363,45 @@ function doReconnect(socket, room, oldId, player) {
 // ===========================================
 // ROUND TIMER
 // ===========================================
-function startRoundTimer(code) {
+function startSubmitTimer(code) {
   const room = getRoom(code);
   if (!room) return;
   
   if (room.roundTimer) clearInterval(room.roundTimer);
   
-  room.roundTimeLeft = ROUND_TIMER_SECONDS;
+  room.roundTimeLeft = SUBMIT_TIMER_SECONDS;
+  room.timerPhase = 'submit';
   
   room.roundTimer = setInterval(() => {
     room.roundTimeLeft--;
-    io.to(code).emit("round-timer", room.roundTimeLeft);
+    io.to(code).emit("round-timer", { time: room.roundTimeLeft, phase: 'submit' });
     
     if (room.roundTimeLeft <= 0) {
       clearInterval(room.roundTimer);
       room.roundTimer = null;
       
-      // Auto-submit for players who haven't
       const nonCzar = Object.entries(room.players).filter(([id, p]) => 
         !p.isCzar && !p.submitted && !p.disconnected && p.name
       );
       
       nonCzar.forEach(([id, p]) => {
-        // Pick a random revealed card or first card
         if (p.hand && p.hand.length > 0) {
-          const card = p.hand[0];
-          p.hand.splice(0, 1);
+          let cardIdx = p.hand.findIndex(c => c !== BLANK_CARD);
+          if (cardIdx === -1) cardIdx = 0;
+          
+          const card = p.hand[cardIdx];
+          p.hand.splice(cardIdx, 1);
           
           const newCard = drawWhiteCard(room, p.hand);
           if (newCard) p.hand.push(newCard);
           
+          ensureBlankCard(p);
+          autoRevealAllCards(p);
+          
           p.submitted = true;
           room.submissions.push({ 
             odumid: id, 
-            card: card, 
+            card: card === BLANK_CARD ? "[No answer]" : card, 
             name: p.name,
             autoSubmit: true 
           });
@@ -401,6 +410,60 @@ function startRoundTimer(code) {
       
       room.submissions = shuffle(room.submissions);
       sendGameState(code);
+      startJudgeTimer(code);
+    }
+  }, 1000);
+}
+
+function startJudgeTimer(code) {
+  const room = getRoom(code);
+  if (!room) return;
+  
+  if (room.roundTimer) clearInterval(room.roundTimer);
+  
+  room.roundTimeLeft = JUDGE_TIMER_SECONDS;
+  room.timerPhase = 'judge';
+  
+  io.to(code).emit("judge-phase");
+  
+  room.roundTimer = setInterval(() => {
+    room.roundTimeLeft--;
+    io.to(code).emit("round-timer", { time: room.roundTimeLeft, phase: 'judge' });
+    
+    if (room.roundTimeLeft <= 0) {
+      clearInterval(room.roundTimer);
+      room.roundTimer = null;
+      
+      if (room.submissions.length > 0) {
+        const randomSubmission = room.submissions[Math.floor(Math.random() * room.submissions.length)];
+        const winner = room.players[randomSubmission.odumid];
+        
+        if (winner) {
+          winner.score++;
+          room.lastWinner = { name: winner.name, odumid: randomSubmission.odumid };
+          
+          room.winningCards.push({
+            round: room.roundNumber,
+            black: room.currentBlack,
+            white: randomSubmission.card,
+            winner: winner.name
+          });
+          
+          io.to(code).emit("round-winner", { 
+            name: winner.name, 
+            score: winner.score, 
+            odumid: randomSubmission.odumid,
+            card: randomSubmission.card,
+            autoSelected: true
+          });
+          
+          if (winner.score >= WIN_POINTS) {
+            io.to(code).emit("game-winner", { name: winner.name, score: winner.score });
+          } else {
+            setTimeout(() => nextRound(code), 3500);
+          }
+        }
+      }
     }
   }, 1000);
 }
@@ -419,6 +482,22 @@ function stopRoundTimer(code) {
 // ===========================================
 const BLANK_CARD = "__BLANK__";
 
+// FIX #8: Ensure player ALWAYS has a blank card
+function ensureBlankCard(player) {
+  if (!player.hand) player.hand = [];
+  player.hand = player.hand.filter(c => c !== BLANK_CARD);
+  player.hand.unshift(BLANK_CARD);
+  return true;
+}
+
+// FIX #1: Auto-reveal all cards in player's hand
+function autoRevealAllCards(player) {
+  player.revealedCards = [];
+  for (let i = 0; i < player.hand.length; i++) {
+    player.revealedCards.push(i);
+  }
+}
+
 function startGame(code) {
   const room = getRoom(code);
   if (!room) return;
@@ -428,6 +507,7 @@ function startGame(code) {
   room.whiteDiscard = [];
   room.blackDeck = shuffle([...blackCardsOriginal]);
   room.blackDiscard = [];
+  room.usedBlackCards = [];
   room.winningCards = [];
   
   const ids = Object.keys(room.players).filter(id => room.players[id].name && !room.players[id].disconnected);
@@ -437,18 +517,17 @@ function startGame(code) {
     p.hand = [];
     p.revealedCards = [];
     
-    // First card is always a BLANK card
-    p.hand.push(BLANK_CARD);
-    
-    // Fill rest with regular cards
     const existing = [];
-    for (let j = 1; j < HAND_SIZE; j++) {
+    for (let j = 0; j < HAND_SIZE - 1; j++) {
       const card = drawWhiteCard(room, existing);
       if (card) {
         p.hand.push(card);
         existing.push(card);
       }
     }
+    
+    ensureBlankCard(p);
+    autoRevealAllCards(p);
     
     p.score = 0;
     p.submitted = false;
@@ -461,7 +540,7 @@ function startGame(code) {
   room.roundNumber = 1;
   
   io.to(code).emit("game-start");
-  startRoundTimer(code);
+  startSubmitTimer(code);
   sendGameState(code);
 }
 
@@ -474,10 +553,14 @@ function sendGameState(code) {
   const nonCzar = players.filter(p => !p.isCzar);
   const allSubmitted = room.submissions.length >= nonCzar.length && nonCzar.length > 0;
   
-  // Stop timer when all submitted
-  if (allSubmitted && room.roundTimer) {
+  if (allSubmitted && room.timerPhase === 'submit') {
     stopRoundTimer(code);
+    startJudgeTimer(code);
   }
+  
+  const submittedCount = room.submissions.length;
+  const expectedCount = nonCzar.length;
+  const waitingForSubmissions = !allSubmitted && room.timerPhase === 'submit';
   
   for (const [id, p] of Object.entries(room.players)) {
     if (!p.name || p.disconnected) continue;
@@ -487,7 +570,8 @@ function sendGameState(code) {
       const handWithStatus = p.hand.map((card, idx) => ({
         card: card,
         revealed: p.revealedCards ? p.revealedCards.includes(idx) : false,
-        index: idx
+        index: idx,
+        isBlank: card === BLANK_CARD
       }));
       
       sock.emit("game-state", {
@@ -499,8 +583,9 @@ function sendGameState(code) {
         submitted: p.submitted,
         submissions: room.submissions.map(s => ({ odumid: s.odumid, card: s.card })),
         allSubmitted: allSubmitted,
-        submissionCount: room.submissions.length,
-        expectedCount: nonCzar.length,
+        submissionCount: submittedCount,
+        expectedCount: expectedCount,
+        waitingForSubmissions: waitingForSubmissions,
         players: players.map(x => ({
           name: x.name,
           score: x.score,
@@ -509,12 +594,13 @@ function sendGameState(code) {
         })),
         roundNumber: room.roundNumber,
         roundTimeLeft: room.roundTimeLeft || 0,
+        timerPhase: room.timerPhase || 'submit',
         winningCards: room.winningCards || []
       });
     }
   }
   
-  // Pending players
+  // FIX #7: Pending players see waiting message
   for (const [id, p] of Object.entries(room.pendingPlayers || {})) {
     const sock = io.sockets.sockets.get(id);
     if (sock) {
@@ -523,12 +609,23 @@ function sendGameState(code) {
         czarName: czar ? czar.name : "...",
         isCzar: false,
         myHand: [],
-        submitted: true,
+        submitted: false,
         submissions: room.submissions.map(s => ({ odumid: s.odumid, card: s.card })),
         allSubmitted: allSubmitted,
-        players: players.map(x => ({ name: x.name, score: x.score, isCzar: x.isCzar, submitted: x.submitted })),
+        submissionCount: submittedCount,
+        expectedCount: expectedCount,
+        waitingForSubmissions: waitingForSubmissions,
+        players: players.map(x => ({
+          name: x.name,
+          score: x.score,
+          isCzar: x.isCzar,
+          submitted: x.submitted
+        })),
+        roundNumber: room.roundNumber,
+        roundTimeLeft: room.roundTimeLeft || 0,
+        timerPhase: room.timerPhase || 'submit',
         isPending: true,
-        roundTimeLeft: room.roundTimeLeft || 0
+        pendingMessage: "Finishing current round — you will be added next round."
       });
     }
   }
@@ -538,20 +635,26 @@ function nextRound(code) {
   const room = getRoom(code);
   if (!room) return;
   
-  // Add pending players
+  // FIX #7: Add pending players at start of round
   for (const [id, pending] of Object.entries(room.pendingPlayers || {})) {
     room.players[id] = pending;
     pending.hand = [];
     pending.revealedCards = [];
+    
     const existing = [];
-    for (let j = 0; j < HAND_SIZE; j++) {
+    for (let j = 0; j < HAND_SIZE - 1; j++) {
       const card = drawWhiteCard(room, existing);
       if (card) {
         pending.hand.push(card);
         existing.push(card);
       }
     }
+    
+    ensureBlankCard(pending);
+    autoRevealAllCards(pending);
+    
     pending.score = 0;
+    pending.submitted = false;
     io.to(code).emit("player-joined-game", { name: pending.name });
   }
   room.pendingPlayers = {};
@@ -575,19 +678,21 @@ function nextRound(code) {
     const p = room.players[id];
     p.isCzar = (i === room.czarIndex);
     p.submitted = false;
-    p.revealedCards = [];
+    
+    ensureBlankCard(p);
+    autoRevealAllCards(p);
   });
   
   room.currentBlack = drawBlackCard(room);
   room.submissions = [];
   room.roundNumber++;
   
-  startRoundTimer(code);
+  startSubmitTimer(code);
   sendGameState(code);
 }
 
 // ===========================================
-// REMATCH (keeps players)
+// REMATCH & RESET
 // ===========================================
 function rematch(code) {
   const room = getRoom(code);
@@ -600,6 +705,7 @@ function rematch(code) {
   room.whiteDiscard = [];
   room.blackDeck = shuffle([...blackCardsOriginal]);
   room.blackDiscard = [];
+  room.usedBlackCards = [];
   room.submissions = [];
   room.roundNumber = 0;
   room.winningCards = [];
@@ -618,9 +724,6 @@ function rematch(code) {
   broadcastLobby(code);
 }
 
-// ===========================================
-// FULL RESET (kicks everyone, destroys room)
-// ===========================================
 function fullReset(code) {
   const room = getRoom(code);
   if (!room) return;
@@ -632,19 +735,15 @@ function fullReset(code) {
     room.countdownTimer = null;
   }
   
-  // Kick everyone back to home
   io.to(code).emit("full-reset");
   
-  // Clear all player sessions for this room
   for (const [sid, sess] of Object.entries(playerSessions)) {
     if (sess.roomCode === code) {
       delete playerSessions[sid];
     }
   }
   
-  // Delete the room entirely
   delete rooms[code];
-  
   console.log(`Room ${code} fully reset and destroyed`);
 }
 
@@ -654,7 +753,6 @@ function fullReset(code) {
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
   
-  // Generate session ID for reconnection
   socket.sessionId = null;
   
   socket.on("set-session", (sessionId) => {
@@ -692,7 +790,6 @@ io.on("connection", (socket) => {
     socket.roomCode = code;
     socket.playerName = name;
     
-    // Create session for reconnection
     socket.sessionId = socket.sessionId || generateCode();
     playerSessions[socket.sessionId] = {
       name: name,
@@ -700,6 +797,7 @@ io.on("connection", (socket) => {
       odumid: socket.id
     };
     
+    // FIX #7: Handle mid-round joins
     if (room.started) {
       room.pendingPlayers = room.pendingPlayers || {};
       room.pendingPlayers[socket.id] = { name: name, ready: true, disconnected: false };
@@ -748,9 +846,10 @@ io.on("connection", (socket) => {
     
     let cardText = data.card;
     
-    // Handle blank card with custom text
     if (data.card === BLANK_CARD && data.customText) {
       cardText = filter.clean(data.customText.substring(0, 100));
+    } else if (data.card === BLANK_CARD) {
+      cardText = "[Blank]";
     }
     
     const idx = p.hand.indexOf(data.card);
@@ -766,7 +865,9 @@ io.on("connection", (socket) => {
     const newCard = drawWhiteCard(room, p.hand);
     if (newCard) p.hand.push(newCard);
     
-    // Don't discard blank cards
+    ensureBlankCard(p);
+    autoRevealAllCards(p);
+    
     if (data.card !== BLANK_CARD) {
       room.whiteDiscard.push(data.card);
     }
@@ -788,12 +889,13 @@ io.on("connection", (socket) => {
     const winner = room.players[odumid];
     if (!winner) return;
     
+    stopRoundTimer(socket.roomCode);
+    
     const winningSubmission = room.submissions.find(s => s.odumid === odumid);
     
     winner.score++;
     room.lastWinner = { name: winner.name, odumid: odumid };
     
-    // Track winning card
     if (winningSubmission) {
       room.winningCards.push({
         round: room.roundNumber,
@@ -811,7 +913,6 @@ io.on("connection", (socket) => {
     });
     
     if (winner.score >= WIN_POINTS) {
-      stopRoundTimer(socket.roomCode);
       io.to(socket.roomCode).emit("game-winner", { name: winner.name, score: winner.score });
     } else {
       setTimeout(() => nextRound(socket.roomCode), 3500);
@@ -860,19 +961,14 @@ io.on("connection", (socket) => {
   });
   
   socket.on("disconnect", () => {
-    const room = getRoom(socket.roomCode);
-    if (!room) return;
-    
-    if (room.pendingPlayers?.[socket.id]) {
-      delete room.pendingPlayers[socket.id];
-      return;
-    }
-    
-    if (room.players[socket.id]) {
-      startReconnectTimer(socket.roomCode, socket.id);
-    }
+    console.log("Disconnected:", socket.id);
+    handleDisconnect(socket);
   });
 });
 
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-setInterval(() => console.log("Keep-alive"), 280000);
+// ===========================================
+// SERVER
+// ===========================================
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
