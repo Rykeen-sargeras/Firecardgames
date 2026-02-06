@@ -22,7 +22,6 @@
       --glow-orange: rgba(255, 87, 34, 0.5);
       --glass-border: rgba(255, 255, 255, 0.1);
       
-      /* Card size - standard playing card ratio 2.5:3.5 */
       --card-width: 150px;
       --card-height: 210px;
     }
@@ -97,6 +96,17 @@
       color: #fff;
       font-size: 17px;
       padding: 18px 50px;
+    }
+    .btn-confirm {
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #fff;
+      padding: 16px 40px;
+      font-size: 16px;
+      animation: confirmPulse 1s ease-in-out infinite;
+    }
+    @keyframes confirmPulse {
+      0%, 100% { box-shadow: 0 4px 20px rgba(34, 197, 94, 0.4); }
+      50% { box-shadow: 0 4px 30px rgba(34, 197, 94, 0.8); }
     }
     
     /* ========== INPUTS ========== */
@@ -349,6 +359,26 @@
       transition: width 0.3s;
     }
     
+    /* FIX #4 & #7: WAITING BANNER */
+    #waitingBanner {
+      display: none;
+      background: rgba(255, 138, 80, 0.2);
+      border: 1px solid var(--ember);
+      color: var(--ember);
+      padding: 12px 25px;
+      border-radius: 10px;
+      text-align: center;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 15px;
+    }
+    #waitingBanner.active { display: block; }
+    #waitingBanner.pending {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: #22c55e;
+      color: #22c55e;
+    }
+    
     /* BLACK CARD */
     .black-card-container {
       display: flex;
@@ -397,7 +427,7 @@
       position: relative;
     }
     
-    /* ========== SUBMITTED WHITE CARDS (Face Up) ========== */
+    /* ========== SUBMITTED WHITE CARDS ========== */
     .white-card.submitted {
       width: 100%;
       height: 100%;
@@ -426,14 +456,12 @@
       word-break: break-word;
     }
     
-    /* HOVER ZOOM for submitted cards */
     .white-card.submitted:hover {
       transform: scale(1.4) translateY(-20px);
       box-shadow: 0 20px 60px rgba(0,0,0,0.6);
       z-index: 100;
     }
     
-    /* PICKABLE cards (Czar can click) */
     .white-card.pickable {
       cursor: pointer;
       animation: cardPulse 2s ease-in-out infinite;
@@ -450,7 +478,6 @@
       box-shadow: 0 25px 70px rgba(0,0,0,0.6), 0 0 40px var(--glow-orange);
     }
     
-    /* EMPTY SLOT */
     .card-wrapper.empty .white-card {
       width: 100%;
       height: 100%;
@@ -466,7 +493,7 @@
       border-top: 1px solid var(--glass-border);
       padding: 20px 30px;
       flex-shrink: 0;
-      min-height: 270px;
+      min-height: 320px;
     }
     
     #handCards {
@@ -474,72 +501,63 @@
       justify-content: center;
       gap: 15px;
       flex-wrap: wrap;
+      margin-bottom: 15px;
     }
     
-    /* ========== HAND CARDS (with flip) ========== */
-    .white-card {
+    /* ========== HAND CARDS (Face Up - Auto Revealed) ========== */
+    .white-card.face-up {
       width: 100%;
       height: 100%;
-      position: relative;
-      transform-style: preserve-3d;
-      transition: transform 0.5s, box-shadow 0.3s;
-      cursor: default;
-    }
-    
-    .white-card.flipped { transform: rotateY(180deg); }
-    
-    .card-face {
-      position: absolute;
-      inset: 0;
-      backface-visibility: hidden;
+      background: url('whitecard.png') center center / cover no-repeat;
+      background-color: #f8f6f3;
+      color: #1a1311;
       border-radius: 12px;
+      padding: 15px 12px;
+      font-size: 13px;
+      font-weight: 600;
       display: flex;
       align-items: center;
       justify-content: center;
       text-align: center;
-      padding: 15px 12px;
-      font-size: 13px;
-      font-weight: 600;
       line-height: 1.35;
       box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      cursor: pointer;
+      transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
+      border: 3px solid transparent;
     }
     
-    /* CARD BACK */
-    .card-back {
-      background: url('cardsback.png') center center / cover no-repeat;
-      background-color: #2a2520;
-      border: 2px solid var(--ash);
-      color: var(--ember);
-      font-size: 32px;
+    .white-card.face-up .card-content {
+      max-height: 100%;
+      overflow: hidden;
+      word-break: break-word;
     }
     
-    /* CARD FRONT */
-    .card-front {
-      background: url('whitecard.png') center center / cover no-repeat;
-      background-color: #f8f6f3;
-      color: #1a1311;
-      transform: rotateY(180deg);
+    .white-card.playable {
+      animation: cardPulse 2s ease-in-out infinite;
+    }
+    
+    .white-card.playable:hover {
+      animation: none;
+      transform: scale(1.15) translateY(-15px);
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 30px var(--glow-orange);
+    }
+    
+    /* FIX #3: Selected card style */
+    .white-card.selected {
+      animation: none;
+      border-color: #22c55e !important;
+      box-shadow: 0 0 30px rgba(34, 197, 94, 0.6), 0 8px 30px rgba(0,0,0,0.4) !important;
+      transform: scale(1.05) translateY(-8px);
     }
     
     /* BLANK CARD */
-    .white-card.blank-card .card-front {
+    .white-card.blank-card {
       background: linear-gradient(145deg, #2a2520, #1a1815);
       border: 3px dashed var(--ember);
       color: var(--ember);
     }
-    
-    /* PLAYABLE hand cards */
-    .white-card.playable {
-      cursor: pointer;
-      animation: cardPulse 2s ease-in-out infinite;
-    }
-    
-    /* HOVER ZOOM for hand cards */
-    .white-card.playable:hover {
-      animation: none;
-      transform: rotateY(180deg) scale(1.4) translateY(-30px);
-      box-shadow: 0 25px 60px rgba(0,0,0,0.6), 0 0 35px var(--glow-orange);
-      z-index: 100;
+    .white-card.blank-card.selected {
+      border: 3px solid #22c55e !important;
     }
     
     .status-msg {
@@ -548,6 +566,35 @@
       padding: 40px;
       color: var(--text-dim);
       font-size: 18px;
+    }
+    
+    .pending-msg {
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px dashed #22c55e;
+      border-radius: 12px;
+      color: #22c55e;
+    }
+    
+    /* FIX #3: CONFIRM AREA */
+    #confirmArea {
+      display: none;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      padding: 15px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 12px;
+      margin-top: 10px;
+    }
+    #confirmArea.active { display: flex; }
+    
+    #confirmCardText {
+      font-size: 14px;
+      color: var(--text);
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     
     /* ========== MODALS ========== */
@@ -775,7 +822,7 @@
   <div id="gameScreen" class="screen">
     <div class="game-header">
       <div class="czar-info">👑 Czar: <span id="czarName">...</span></div>
-      <div class="round-timer" id="roundTimer">⏱️ <span id="timerDisplay">45s</span></div>
+      <div class="round-timer" id="roundTimer"><span id="timerLabel">⏱️</span> <span id="timerDisplay">3:00</span></div>
       <div class="round-info">Round <span id="roundNum">1</span></div>
     </div>
     
@@ -793,6 +840,9 @@
           </div>
         </div>
         
+        <!-- FIX #4 & #7: Waiting Banner -->
+        <div id="waitingBanner"></div>
+        
         <div class="black-card-container">
           <div id="blackCard">Loading...</div>
         </div>
@@ -803,6 +853,13 @@
     
     <div id="handArea">
       <div id="handCards"></div>
+      
+      <!-- FIX #3: Confirm Area for Double-Click -->
+      <div id="confirmArea">
+        <span id="confirmCardText">Selected card text...</span>
+        <button class="btn-confirm" onclick="confirmSelectedCard()">✅ CONFIRM & SUBMIT</button>
+        <button class="btn-glass" onclick="cancelCardSelection()">✖ CANCEL</button>
+      </div>
     </div>
   </div>
 

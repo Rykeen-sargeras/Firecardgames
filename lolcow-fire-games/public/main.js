@@ -13,9 +13,14 @@ let isSubmitting = false;
 let lastActionTime = 0;
 let adminPassword = null;
 
+// FIX #3: Double-confirm state for card submission
+let selectedCard = null;
+let selectedCardIndex = null;
+let confirmPending = false;
+
 // Session persistence
 const SESSION_KEY = 'cah_session';
-const DEBOUNCE_MS = 500;
+const DEBOUNCE_MS = 300;
 
 // ===========================================
 // SESSION PERSISTENCE
@@ -321,6 +326,7 @@ socket.on("game-start", () => {
   document.getElementById("countdownOverlay").classList.remove("active");
   showScreen("gameScreen");
   saveSession();
+  resetCardSelection();
 });
 
 socket.on("game-state", (data) => {
@@ -334,6 +340,7 @@ socket.on("game-reset", () => {
   showScreen("lobbyScreen");
   showToast("Game reset");
   document.getElementById("winnerOverlay").classList.remove("active", "game-over");
+  resetCardSelection();
 });
 
 socket.on("full-reset", () => {
@@ -341,28 +348,75 @@ socket.on("full-reset", () => {
   showScreen("homeScreen");
   showToast("Room closed by admin");
   document.getElementById("winnerOverlay").classList.remove("active", "game-over");
+  resetCardSelection();
 });
 
 socket.on("game-ended", (data) => {
   showScreen("lobbyScreen");
   showToast(data.reason || "Game ended");
+  resetCardSelection();
 });
 
-socket.on("round-timer", (seconds) => {
+socket.on("round-timer", (data) => {
   const timerEl = document.getElementById("timerDisplay");
   const timerContainer = document.getElementById("roundTimer");
-  timerEl.textContent = seconds + "s";
-  timerContainer.classList.toggle("urgent", seconds <= 10);
+  
+  const seconds = typeof data === 'object' ? data.time : data;
+  const phase = typeof data === 'object' ? data.phase : 'submit';
+  
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  timerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+  
+  timerContainer.classList.toggle("urgent", seconds <= 15);
+  
+  const timerLabel = document.getElementById("timerLabel");
+  if (timerLabel) {
+    timerLabel.textContent = phase === 'judge' ? '⚖️' : '⏱️';
+  }
+});
+
+socket.on("judge-phase", () => {
+  showToast("Time to judge!");
 });
 
 socket.on("round-winner", (data) => {
   showWinner(`🎉 ${data.name} wins!`, false);
+  resetCardSelection();
 });
 
 socket.on("game-winner", (data) => {
   showWinner(`🏆 ${data.name} WINS! 🏆`, true);
   fireConfetti();
+  resetCardSelection();
 });
+
+// ===========================================
+// FIX #3: Reset card selection state
+// ===========================================
+function resetCardSelection() {
+  selectedCard = null;
+  selectedCardIndex = null;
+  confirmPending = false;
+  hideConfirmButton();
+}
+
+function hideConfirmButton() {
+  const confirmArea = document.getElementById("confirmArea");
+  if (confirmArea) {
+    confirmArea.classList.remove("active");
+  }
+}
+
+function showConfirmButton(cardText, isBlank) {
+  const confirmArea = document.getElementById("confirmArea");
+  const confirmText = document.getElementById("confirmCardText");
+  
+  if (confirmArea && confirmText) {
+    confirmText.textContent = isBlank ? "✏️ BLANK CARD (Write your own)" : cardText;
+    confirmArea.classList.add("active");
+  }
+}
 
 // ===========================================
 // RENDER GAME
@@ -375,8 +429,10 @@ function renderGame() {
   document.getElementById("roundNum").textContent = data.roundNumber || 1;
   
   if (data.roundTimeLeft > 0) {
-    document.getElementById("timerDisplay").textContent = data.roundTimeLeft + "s";
-    document.getElementById("roundTimer").classList.toggle("urgent", data.roundTimeLeft <= 10);
+    const mins = Math.floor(data.roundTimeLeft / 60);
+    const secs = data.roundTimeLeft % 60;
+    document.getElementById("timerDisplay").textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    document.getElementById("roundTimer").classList.toggle("urgent", data.roundTimeLeft <= 15);
   }
   
   const submitted = data.submissionCount || 0;
@@ -385,11 +441,35 @@ function renderGame() {
   document.getElementById("progressText").textContent = `${submitted}/${expected} submitted`;
   document.getElementById("progressFill").style.width = pct + "%";
   
+  // FIX #4: Show waiting state banner
+  const waitingBanner = document.getElementById("waitingBanner");
+  if (waitingBanner) {
+    if (data.isPending) {
+      // FIX #7: Show pending player banner
+      waitingBanner.textContent = data.pendingMessage || "Finishing current round — you will be added next round.";
+      waitingBanner.classList.add("active", "pending");
+    } else if (data.waitingForSubmissions && !data.isCzar && data.submitted) {
+      waitingBanner.textContent = "⏳ Waiting for other players to submit cards...";
+      waitingBanner.classList.add("active");
+      waitingBanner.classList.remove("pending");
+    } else if (data.allSubmitted && data.isCzar) {
+      waitingBanner.textContent = "👑 Pick the funniest card!";
+      waitingBanner.classList.add("active");
+      waitingBanner.classList.remove("pending");
+    } else if (data.allSubmitted && !data.isCzar) {
+      waitingBanner.textContent = "⏳ Waiting for the Czar to pick a winner...";
+      waitingBanner.classList.add("active");
+      waitingBanner.classList.remove("pending");
+    } else {
+      waitingBanner.classList.remove("active", "pending");
+    }
+  }
+  
   document.getElementById("scoreboard").innerHTML = data.players.map(p => {
     let classes = "score-row";
     if (p.isCzar) classes += " czar";
     return `<div class="${classes}">
-      <span>${escapeHtml(p.name)}${p.isCzar ? " 👑" : ""}</span>
+      <span>${escapeHtml(p.name)}${p.isCzar ? " 👑" : ""}${p.submitted ? " ✓" : ""}</span>
       <span style="font-weight:600">${p.score}</span>
     </div>`;
   }).join("");
@@ -402,7 +482,6 @@ function renderSubmissions(data) {
   const grid = document.getElementById("submissionGrid");
   const slots = [];
   
-  // Submitted cards show face-up with text visible (anonymous - no names shown)
   data.submissions.forEach((s) => {
     const canPick = data.isCzar && data.allSubmitted;
     slots.push(`
@@ -416,7 +495,6 @@ function renderSubmissions(data) {
     `);
   });
   
-  // Fill empty slots
   while (slots.length < 10) {
     slots.push('<div class="card-wrapper empty"><div class="white-card"><div class="card-text"></div></div></div>');
   }
@@ -427,18 +505,22 @@ function renderSubmissions(data) {
 function renderHand(data) {
   const hand = document.getElementById("handCards");
   
+  // FIX #7: Pending player message
   if (data.isPending) {
-    hand.innerHTML = '<div class="status-msg">⏳ You\'ll join next round!</div>';
+    hand.innerHTML = `<div class="status-msg pending-msg">⏳ ${data.pendingMessage || "You'll join next round!"}</div>`;
+    hideConfirmButton();
     return;
   }
   
   if (data.isCzar) {
     hand.innerHTML = '<div class="status-msg">👑 You\'re the Card Czar! Pick the funniest card above.</div>';
+    hideConfirmButton();
     return;
   }
   
   if (data.submitted) {
     hand.innerHTML = '<div class="status-msg">✅ Card submitted! Waiting for others...</div>';
+    hideConfirmButton();
     return;
   }
   
@@ -447,20 +529,20 @@ function renderHand(data) {
     return;
   }
   
+  // FIX #1: Cards are auto-revealed, so always show them face-up
   hand.innerHTML = data.myHand.map((cardData) => {
-    const isRevealed = cardData.revealed;
     const card = cardData.card;
     const isBlank = card === BLANK_CARD;
+    const isSelected = selectedCardIndex === cardData.index;
     
     return `
       <div class="card-wrapper">
-        <div class="white-card ${isRevealed ? 'flipped playable' : ''} ${isBlank && isRevealed ? 'blank-card' : ''}"
+        <div class="white-card face-up playable ${isBlank ? 'blank-card' : ''} ${isSelected ? 'selected' : ''}"
           data-index="${cardData.index}"
           data-card="${escapeAttr(card)}"
           data-blank="${isBlank}"
-          onclick="handleCardClick(${cardData.index}, '${escapeAttr(card)}', ${isRevealed}, ${isBlank})">
-          <div class="card-face card-back">?</div>
-          <div class="card-face card-front">${isBlank ? '✏️ BLANK' : escapeHtml(card)}</div>
+          onclick="handleCardClick(${cardData.index}, '${escapeAttr(card)}', ${isBlank})">
+          <div class="card-content">${isBlank ? '✏️ BLANK<br><small>Write your own</small>' : escapeHtml(card)}</div>
         </div>
       </div>
     `;
@@ -468,27 +550,38 @@ function renderHand(data) {
 }
 
 // ===========================================
-// CARD INTERACTIONS
+// CARD INTERACTIONS - FIX #3: Double Confirm
 // ===========================================
-async function handleCardClick(index, card, revealed, isBlank) {
+async function handleCardClick(index, card, isBlank) {
   if (!canPerformAction()) return;
+  if (isSubmitting) return;
   
-  if (!revealed) {
-    // Reveal card - optimistic UI
-    const cardEl = document.querySelector(`[data-index="${index}"]`);
-    if (cardEl) {
-      cardEl.classList.add("flipped", "playable");
-      if (isBlank) cardEl.classList.add("blank-card");
-    }
-    socket.emit("reveal-card", index);
-  } else {
-    // Play card
+  // If clicking the same card that's already selected, this is the second click - submit
+  if (selectedCardIndex === index && confirmPending) {
     if (isBlank) {
       await playBlankCard(index, card);
     } else {
-      playCard(index, card, null);
+      await confirmAndPlayCard(index, card, null);
     }
+    return;
   }
+  
+  // First click - select the card and show confirm button
+  selectedCard = card;
+  selectedCardIndex = index;
+  confirmPending = true;
+  
+  // Highlight selected card
+  document.querySelectorAll('.white-card.playable').forEach(el => {
+    el.classList.remove('selected');
+  });
+  const cardEl = document.querySelector(`[data-index="${index}"]`);
+  if (cardEl) {
+    cardEl.classList.add('selected');
+  }
+  
+  // Show confirm button
+  showConfirmButton(card, isBlank);
 }
 
 async function playBlankCard(index, card) {
@@ -499,16 +592,40 @@ async function playBlankCard(index, card) {
   );
   
   if (customText && customText.trim()) {
-    playCard(index, card, customText.trim());
+    await confirmAndPlayCard(index, card, customText.trim());
+  } else {
+    resetCardSelection();
   }
 }
 
-function playCard(index, card, customText) {
+async function confirmAndPlayCard(index, card, customText) {
   if (isSubmitting) return;
   isSubmitting = true;
   
+  hideConfirmButton();
   document.getElementById("handCards").innerHTML = '<div class="status-msg">✅ Submitting...</div>';
   socket.emit("submit", { card: card, customText: customText });
+  resetCardSelection();
+}
+
+// Called from confirm button
+async function confirmSelectedCard() {
+  if (!selectedCard || selectedCardIndex === null) return;
+  
+  const isBlank = selectedCard === BLANK_CARD;
+  if (isBlank) {
+    await playBlankCard(selectedCardIndex, selectedCard);
+  } else {
+    await confirmAndPlayCard(selectedCardIndex, selectedCard, null);
+  }
+}
+
+function cancelCardSelection() {
+  resetCardSelection();
+  // Re-render to remove selection highlight
+  if (gameState.myHand) {
+    renderHand(gameState);
+  }
 }
 
 function pickWinner(odumid) {
